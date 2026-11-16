@@ -1,0 +1,11 @@
+#environment variables
+.env
+
+#documents 
+/docs
+
+#tickets data
+/tickets
+#python
+__pycache__/
+*.pyc
