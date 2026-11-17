@@ -8,7 +8,7 @@ from typing import Any
 import pytest
 
 from escal8r.helpdesk import AlreadyHandled, HelpdeskError, OutcomeUnknown, RetriesExhausted
-from escal8r.models import Decision, Ticket
+from escal8r.models import Decided, Decision, Ticket
 from escal8r.runner import reset_all, run
 from escal8r.state import AlreadyRunning, StateStore, Status
 
@@ -56,11 +56,12 @@ class CountingDecider:
     def __init__(self) -> None:
         self.calls: list[str] = []
 
-    def __call__(self, ticket: Ticket) -> Decision:
+    def __call__(self, ticket: Ticket) -> Decided:
         self.calls.append(ticket.id)
-        return Decision(
+        decision = Decision(
             action="close", language="nl", category="other", priority="P4", reason="test"
         )
+        return Decided(decision=decision, trace={"rule": "test"})
 
 
 @pytest.fixture
@@ -150,7 +151,7 @@ def test_validation_error_marks_failed(store):
 def test_decider_error_fails_one_ticket_not_the_run(store):
     desk = FakeHelpdesk(["T001", "T002"])
 
-    def decide(ticket: Ticket) -> Decision:
+    def decide(ticket: Ticket) -> Decided:
         if ticket.id == "T001":
             raise RuntimeError("model down")
         return CountingDecider()(ticket)
@@ -215,3 +216,38 @@ def test_reset_all_keeps_state_if_api_reset_fails(store):
     with pytest.raises(RetriesExhausted):
         reset_all(desk, store)
     assert store.counts()["done"] == 1
+
+
+def test_budget_stop_leaves_remaining_tickets_open(store):
+    from escal8r.openrouter import BudgetExceeded
+
+    desk, counting = FakeHelpdesk(["T001", "T002", "T003"]), CountingDecider()
+
+    def decide(ticket: Ticket) -> Decided:
+        if ticket.id == "T002":
+            raise BudgetExceeded("limit reached")
+        return counting(ticket)
+
+    summary = run(desk, store, decide)
+    assert summary.posted == ["T001"]
+    assert summary.not_started == ["T002", "T003"]
+    assert store.get("T002") is None  # untouched, so the next run picks it up
+
+
+def test_one_log_line_per_ticket(tmp_path):
+    import json
+
+    from escal8r.ticketlog import TicketLog
+
+    desk = FakeHelpdesk(["T001", "T002", "T003"])
+    desk.failures["T002"] = [AlreadyHandled("POST", "/x", 409, "already_handled")]
+    ticket_log = TicketLog(tmp_path / "logs", run_id="t")
+    run(desk, StateStore(tmp_path / "state.json"), CountingDecider(), ticket_log=ticket_log)
+
+    lines = [json.loads(line) for line in ticket_log.path.read_text().splitlines()]
+    assert [(line["ticket"], line["outcome"]) for line in lines] == [
+        ("T001", "posted"),
+        ("T002", "already_handled"),
+        ("T003", "posted"),
+    ]
+    assert lines[0]["trace"] == {"rule": "test"}
