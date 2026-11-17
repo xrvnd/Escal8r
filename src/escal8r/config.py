@@ -19,6 +19,15 @@ OPENROUTER_BASE_URL = "https://openrouter.ai/api"
 JEV_MODEL = "typesafe/jev-1.14"
 DEEPSEEK_MODEL = "deepseek/deepseek-v4-flash-0731"  # dated July release, verified on /v1/models
 
+# The only models this project may call or be served by. Anything else stops the run.
+ALLOWED_MODELS = frozenset(
+    {
+        JEV_MODEL,
+        DEEPSEEK_MODEL,
+        "deepseek/deepseek-v4.1-flash-1017",  # allowed, not used: dearer for our token mix
+    }
+)
+
 # List prices in USD per 1M tokens (input, output), from OpenRouter /v1/models on
 # 17 Nov 2026. Only used to estimate cost when a response does not report it;
 # reported cost always wins.

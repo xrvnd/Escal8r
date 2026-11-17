@@ -216,3 +216,23 @@ def test_budget_blocks_the_next_call():
 def test_parse_json_text_rejects_non_objects():
     with pytest.raises(ModelError):
         parse_json_text("[1, 2]")
+
+
+def test_model_outside_allowlist_is_never_called():
+    server = Server()
+    with client_for(server) as client, pytest.raises(SetupError, match="ALLOWED_MODELS"):
+        client.chat_json("openai/gpt-6.1-sol", "s", "u", purpose="t", max_tokens=10)
+    assert server.requests == []
+
+
+def test_rerouted_to_another_model_stops_the_run():
+    rerouted = chat_response('{"ok": true}')
+    rerouted = httpx.Response(200, json={**rerouted.json(), "model": "deepseek/deepseek-v3.2"})
+    with client_for(Server(rerouted)) as client, pytest.raises(SetupError, match="served by"):
+        client.chat_json(DEEPSEEK_MODEL, "s", "u", purpose="t", max_tokens=10)
+
+
+def test_dated_jev_snapshot_counts_as_allowed():
+    server = Server(decisions_response(jev_answers()))  # served typesafe/jev-1.14-20260917
+    with client_for(server) as client:
+        Jev(client).decide({})

@@ -17,7 +17,12 @@ from typing import Any
 import httpx
 
 from escal8r import tracing
-from escal8r.config import MODEL_PRICES_PER_M, OPENROUTER_BASE_URL, PROVIDER_PREFERENCES
+from escal8r.config import (
+    ALLOWED_MODELS,
+    MODEL_PRICES_PER_M,
+    OPENROUTER_BASE_URL,
+    PROVIDER_PREFERENCES,
+)
 from escal8r.helpdesk import Sleep, backoff_delay
 from escal8r.tracing import current_span
 
@@ -249,10 +254,14 @@ class OpenRouterClient:
                 cost_usd=cost,
                 cost_reported=reported,
             )
-        if _undated(served) != _undated(model):
-            log.warning("%s: asked for %s, served by %s", purpose, model, served)
+        if _undated(served) not in ALLOWED_MODELS:
+            # OpenRouter or the provider rerouted us to a model we did not choose.
+            raise SetupError(f"{purpose}: asked for {model}, served by {served}; stopping")
 
     def _post(self, path: str, body: dict[str, Any]) -> dict[str, Any]:
+        model = str(body.get("model"))
+        if model not in ALLOWED_MODELS:
+            raise SetupError(f"model {model!r} is not in ALLOWED_MODELS; refusing to call it")
         self.tracker.check()
         return self._request("POST", path, body)
 
