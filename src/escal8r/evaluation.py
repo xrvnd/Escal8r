@@ -16,6 +16,7 @@ from typing import Any
 
 from escal8r.models import Decided, Example, Ticket
 from escal8r.redact import contains_payment_details
+from escal8r.tracing import NULL_TRACER, Tracer
 
 FIELDS = ("language", "category", "priority", "action")
 
@@ -35,13 +36,29 @@ class ExampleResult:
     trace: dict[str, Any]
 
 
-def evaluate(examples: list[Example], decide: Callable[[Ticket], Decided]) -> dict[str, Any]:
-    results = [_score_one(example, decide) for example in examples]
+def evaluate(
+    examples: list[Example],
+    decide: Callable[[Ticket], Decided],
+    tracer: Tracer = NULL_TRACER,
+) -> dict[str, Any]:
+    results = []
+    for example in examples:
+        with tracer.span("ticket", ticket_id=example.id) as root:
+            result = _score_one(example, decide)
+            root.set(
+                outcome="eval",
+                action=result.predicted["action"],
+                rule=result.trace.get("rule"),
+                correct=result.correct,
+                expected=result.label,
+            )
+        results.append(result)
     total = len(results) or 1
     cost = sum(float(r.trace.get("cost_usd", 0.0)) for r in results)
     predicted_actions = [r.predicted["action"] for r in results]
     return {
         "created_at": datetime.now(UTC).isoformat(timespec="seconds"),
+        "trace_run": tracer.run_id if tracer.path else None,
         "examples": len(results),
         "accuracy": {f: sum(r.correct[f] for r in results) / total for f in FIELDS},
         "all_fields_correct": sum(all(r.correct.values()) for r in results),

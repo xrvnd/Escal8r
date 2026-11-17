@@ -19,6 +19,7 @@ from escal8r.models import Decided, Decision, Ticket
 from escal8r.openrouter import StopRun
 from escal8r.state import StateStore, Status
 from escal8r.ticketlog import TicketLog
+from escal8r.tracing import NULL_TRACER, Span, Tracer
 
 log = logging.getLogger(__name__)
 
@@ -63,14 +64,15 @@ def run(
     decide: DecideFn,
     *,
     ticket_log: TicketLog | None = None,
+    tracer: Tracer = NULL_TRACER,
     dry_run: bool = False,
 ) -> RunSummary:
     """Handle every open ticket once. In dry-run mode nothing is posted or saved."""
     logger: TicketLog | _NullLog = ticket_log or _NullLog()
     if dry_run:
-        return _run(client, store, decide, logger, dry_run=True)
+        return _run(client, store, decide, logger, tracer, dry_run=True)
     with store.exclusive():
-        return _run(client, store, decide, logger, dry_run=False)
+        return _run(client, store, decide, logger, tracer, dry_run=False)
 
 
 def _run(
@@ -78,59 +80,95 @@ def _run(
     store: StateStore,
     decide: DecideFn,
     logger: TicketLog | _NullLog,
+    tracer: Tracer,
     *,
     dry_run: bool,
 ) -> RunSummary:
     summary = RunSummary()
-    open_tickets = list(client.iter_tickets("open"))
+    with tracer.span("fetch_open") as span:
+        open_tickets = list(client.iter_tickets("open"))
+        span.set(open_tickets=len(open_tickets))
     log.info("%d open tickets", len(open_tickets))
 
     if not dry_run:
         summary.recovered = store.recover({t.id for t in open_tickets})
         for ticket_id in summary.recovered:
             log.info("%s: recovered, helpdesk already has the decision", ticket_id)
-            logger.write(ticket_id, "recovered")
+            with tracer.span("ticket", ticket_id=ticket_id, outcome="recovered") as root:
+                logger.write(ticket_id, "recovered", span_id=root.span_id)
 
     for index, ticket in enumerate(open_tickets):
-        entry = store.get(ticket.id)
-        if entry and entry.status == Status.DONE:
-            # Open in the helpdesk but done locally: the helpdesk was reset without
-            # clearing local state. Never risk a second answer; `escal8r reset` clears both.
-            log.warning("%s: done locally but open in helpdesk; skipped", ticket.id)
-            summary.skipped_done.append(ticket.id)
-            logger.write(ticket.id, "skipped_done_locally")
-            continue
-
-        try:
-            if entry and entry.status == Status.IN_PROGRESS and entry.decision:
-                decided = Decided(decision=entry.decision, trace={"resent_from_state": True})
-            else:
-                decided = decide(ticket)
-        except StopRun as exc:
-            log.error("stopping run: %s", exc)
-            summary.stopped = str(exc)
+        with tracer.span("ticket", ticket_id=ticket.id) as root:
+            stop = _handle(client, store, decide, logger, tracer, ticket, root, summary, dry_run)
+        if stop:
+            summary.stopped = stop
             summary.not_started = [t.id for t in open_tickets[index:]]
             break
-        except Exception as exc:
-            log.exception("%s: decision failed", ticket.id)
-            if not dry_run:
-                store.mark_failed(ticket.id, note="decision failed")
-            summary.failed.append(ticket.id)
-            logger.write(ticket.id, "decision_failed", error=type(exc).__name__)
-            continue
-
-        action = decided.decision.action
-        summary.actions[action] = summary.actions.get(action, 0) + 1
-        if dry_run:
-            summary.dry_run[ticket.id] = decided.decision
-            logger.write(ticket.id, "dry_run", decided.decision, decided.trace)
-            continue
-
-        outcome, error = _post(client, store, ticket.id, decided.decision, summary)
-        logger.write(ticket.id, outcome, decided.decision, decided.trace, error)
 
     log.info("run finished: %s actions=%s", summary.counts(), summary.actions)
     return summary
+
+
+def _handle(
+    client: Helpdesk,
+    store: StateStore,
+    decide: DecideFn,
+    logger: TicketLog | _NullLog,
+    tracer: Tracer,
+    ticket: Ticket,
+    root: Span,
+    summary: RunSummary,
+    dry_run: bool,
+) -> str | None:
+    """Decide and post one ticket inside its root span. Returns a reason to stop the run."""
+    entry = store.get(ticket.id)
+    if entry and entry.status == Status.DONE:
+        # Open in the helpdesk but done locally: the helpdesk was reset without
+        # clearing local state. Never risk a second answer; `escal8r reset` clears both.
+        log.warning("%s: done locally but open in helpdesk; skipped", ticket.id)
+        summary.skipped_done.append(ticket.id)
+        root.set(outcome="skipped_done_locally")
+        logger.write(ticket.id, "skipped_done_locally", span_id=root.span_id)
+        return None
+
+    try:
+        if entry and entry.status == Status.IN_PROGRESS and entry.decision:
+            decided = Decided(decision=entry.decision, trace={"resent_from_state": True})
+            root.set(resent_from_state=True)
+        else:
+            decided = decide(ticket)
+    except StopRun as exc:
+        log.error("stopping run: %s", exc)
+        root.set(outcome="run_stopped")
+        root.fail(str(exc))
+        return str(exc)
+    except Exception as exc:
+        log.exception("%s: decision failed", ticket.id)
+        if not dry_run:
+            store.mark_failed(ticket.id, note="decision failed")
+        summary.failed.append(ticket.id)
+        root.set(outcome="decision_failed")
+        root.fail(f"{type(exc).__name__}: {exc}")
+        logger.write(ticket.id, "decision_failed", error=type(exc).__name__, span_id=root.span_id)
+        return None
+
+    decision = decided.decision
+    summary.actions[decision.action] = summary.actions.get(decision.action, 0) + 1
+    root.set(action=decision.action, rule=decided.trace.get("rule"))
+    if dry_run:
+        summary.dry_run[ticket.id] = decision
+        root.set(outcome="dry_run")
+        logger.write(ticket.id, "dry_run", decision, decided.trace, span_id=root.span_id)
+        return None
+
+    with tracer.span("post", action=decision.action) as span:
+        outcome, error = _post(client, store, ticket.id, decision, summary)
+        span.set(outcome=outcome)
+        if error:
+            span.fail(error)
+    root.set(outcome=outcome)
+    logger.write(ticket.id, outcome, decision, decided.trace, error, span_id=root.span_id)
+    return None
 
 
 def _post(

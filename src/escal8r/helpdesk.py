@@ -12,6 +12,7 @@ Reliability rules (see README > Reliability):
 
 from __future__ import annotations
 
+import json as _json
 import logging
 import random
 import threading
@@ -22,6 +23,7 @@ from urllib.parse import quote
 
 import httpx
 
+from escal8r import tracing
 from escal8r.config import HELPDESK_CALLS_PER_SECOND, Settings
 from escal8r.models import Action, Decision, Example, Ticket
 
@@ -77,14 +79,16 @@ class RateLimiter:
         self._lock = threading.Lock()
         self._next_slot = 0.0
 
-    def wait(self) -> None:
+    def wait(self) -> float:
+        """Block until the next slot. Returns the seconds spent waiting."""
         with self._lock:
             now = self._clock()
-            delay = self._next_slot - now
+            delay = max(0.0, self._next_slot - now)
             if delay > 0:
                 self._sleep(delay)
                 now += delay
             self._next_slot = now + self._interval
+            return delay
 
 
 def backoff_delay(attempt: int, rng: Callable[[], float] = random.random) -> float:
@@ -216,38 +220,56 @@ class HelpdeskClient:
         params: dict[str, Any] | None = None,
         json: dict[str, Any] | None = None,
     ) -> Any:
+        with tracing.span("helpdesk", method=method, path=path) as span:
+            if json is not None:
+                tracing.record_text(span, "request", _json.dumps(json, ensure_ascii=False))
+            attempts: list[dict[str, Any]] = []
+            span.set(attempts=attempts)
+            try:
+                return self._send(method, path, params, json, attempts)
+            finally:
+                span.set(limiter_wait_s=round(sum(a.get("limiter_wait_s", 0) for a in attempts), 3))
+
+    def _send(
+        self,
+        method: str,
+        path: str,
+        params: dict[str, Any] | None,
+        json: dict[str, Any] | None,
+        attempts: list[dict[str, Any]],
+    ) -> Any:
         is_post = method == "POST"
+
+        def retry(result: str, delay: float) -> None:
+            attempts[-1].update(result=result, retry_in_s=round(delay, 2))
+            log.warning("%s %s: %s, retry in %.1fs", method, path, result, delay)
+            self._sleep(delay)
+
         for attempt in range(self._max_attempts):
-            self._limiter.wait()
+            attempts.append({"limiter_wait_s": round(self._limiter.wait(), 3)})
             try:
                 response = self._http.request(method, path, params=params, json=json)
             except (httpx.ConnectError, httpx.ConnectTimeout) as exc:
                 # The request never reached the server: always safe to retry.
-                delay = backoff_delay(attempt)
-                log.warning("%s %s: %s, retry in %.1fs", method, path, type(exc).__name__, delay)
-                self._sleep(delay)
+                retry(type(exc).__name__, backoff_delay(attempt))
                 continue
             except httpx.TransportError as exc:
                 # Sent, but the response was lost.
+                attempts[-1]["result"] = type(exc).__name__
                 if is_post:
                     raise OutcomeUnknown(f"{method} {path}: {type(exc).__name__}") from exc
-                delay = backoff_delay(attempt)
-                log.warning("%s %s: %s, retry in %.1fs", method, path, type(exc).__name__, delay)
-                self._sleep(delay)
+                retry(type(exc).__name__, backoff_delay(attempt))
                 continue
 
             code = response.status_code
+            attempts[-1]["result"] = code
             if code < 400:
                 return response.json() if response.content else {}
             if code == 429:
-                delay = _retry_after_seconds(response)
-                log.warning("%s %s: 429 rate limited, retry in %.1fs", method, path, delay)
-                self._sleep(delay)
+                retry("429 rate limited", _retry_after_seconds(response))
                 continue
             if code == 503:
-                delay = backoff_delay(attempt)
-                log.warning("%s %s: 503, retry in %.1fs", method, path, delay)
-                self._sleep(delay)
+                retry("503", backoff_delay(attempt))
                 continue
 
             error, detail = _error_code(response)
@@ -257,9 +279,7 @@ class HelpdeskClient:
                 if is_post:
                     # Unlike 503, other 5xx do not promise that nothing was saved.
                     raise OutcomeUnknown(f"{method} {path}: HTTP {code}")
-                delay = backoff_delay(attempt)
-                log.warning("%s %s: HTTP %d, retry in %.1fs", method, path, code, delay)
-                self._sleep(delay)
+                retry(f"HTTP {code}", backoff_delay(attempt))
                 continue
             raise HelpdeskError(method, path, code, error, detail)
 

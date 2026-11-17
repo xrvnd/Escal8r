@@ -3,8 +3,9 @@
 redact -> empty? close -> DeepSeek interpret -> Jev decide -> rules pick action
        -> DeepSeek write -> (reply only) Jev verify -> redact output -> Decision
 
-Any model failure ends in a handoff, never in a guessed reply. The trace records
-numbers and names only (no ticket or reply text), so it is safe to log.
+Any model failure ends in a handoff, never in a guessed reply. The `trace` dict
+records numbers and names only (no ticket or reply text) for the committed log.
+Each stage is also a span in the local trail (see tracing.py).
 """
 
 from __future__ import annotations
@@ -19,6 +20,7 @@ from escal8r.models import Category, Decided, Decision, Language, Priority, Tick
 from escal8r.openrouter import CostTracker, ModelError
 from escal8r.redact import contains_payment_details, redact
 from escal8r.rules import pick_action, reply_check_failure
+from escal8r.tracing import record_text, span
 
 # Used only when Jev itself fails and gives us no classification.
 FALLBACK_CATEGORY: Category = "other"
@@ -51,7 +53,19 @@ class Agent:
     def decide(self, ticket: Ticket) -> Decided:
         first_call = len(self._tracker.calls)
         trace: dict[str, Any] = {}
-        decision = self._decide(ticket, trace)
+        with span("decide", ticket_id=ticket.id) as stage:
+            decision = self._decide(ticket, trace)
+            stage.set(
+                rule=trace.get("rule"),
+                action=decision.action,
+                language=decision.language,
+                category=decision.category,
+                priority=decision.priority,
+                confidence=decision.confidence,
+            )
+            record_text(stage, "reason", decision.reason)
+            record_text(stage, "draft_reply", decision.draft_reply)
+            record_text(stage, "handoff_note", decision.handoff_note)
         calls = self._tracker.since(first_call)
         trace["models"] = sorted({call.model_served for call in calls})
         trace["model_calls"] = len(calls)
@@ -66,10 +80,13 @@ class Agent:
     # -- pipeline --------------------------------------------------------------
 
     def _decide(self, ticket: Ticket, trace: dict[str, Any]) -> Decision:
-        safe = ticket.model_copy(
-            update={"subject": redact(ticket.subject), "body": redact(ticket.body)}
-        )
-        trace["payment_details_redacted"] = safe != ticket
+        with span("redact") as stage:
+            safe = ticket.model_copy(
+                update={"subject": redact(ticket.subject), "body": redact(ticket.body)}
+            )
+            trace["payment_details_redacted"] = safe != ticket
+            stage.set(payment_details_redacted=safe != ticket, plan=safe.customer_plan)
+            record_text(stage, "ticket", f"subject: {safe.subject}\nbody: {safe.body}")
 
         if not safe.body.strip():
             trace["rule"] = "empty"
@@ -84,11 +101,18 @@ class Agent:
 
         interpretation = self._interpret(safe, trace)
 
-        try:
-            jev = self._jev.decide(self._decision_state(safe, interpretation))
-        except ModelError as exc:
+        jev: JevDecision | None = None
+        with span("jev_decide") as stage:
+            try:
+                decided = self._jev.decide(self._decision_state(safe, interpretation))
+            except ModelError as exc:
+                stage.fail(str(exc))
+                trace["error"] = str(exc)
+            else:
+                stage.set(**decided.summary())
+                jev = decided
+        if jev is None:
             trace["rule"] = "decision_model_failed"
-            trace["error"] = str(exc)
             return self._templated_handoff(
                 safe,
                 interpretation,
@@ -104,9 +128,11 @@ class Agent:
         confidence = jev.min_confidence
         injection = jev.gates["injection_attempt"] >= INJECTION_THRESHOLD
 
-        outcome = pick_action(
-            jev, self._t, has_requests=bool(interpretation and interpretation.requests)
-        )
+        with span("rules") as stage:
+            outcome = pick_action(
+                jev, self._t, has_requests=bool(interpretation and interpretation.requests)
+            )
+            stage.set(rule=outcome.rule, action=outcome.action, why=outcome.why)
         trace["rule"] = outcome.rule
 
         if outcome.action == "close":
@@ -136,15 +162,24 @@ class Agent:
         )
 
     def _interpret(self, ticket: Ticket, trace: dict[str, Any]) -> Interpretation | None:
-        try:
-            interpretation, dropped = self._deepseek.interpret(ticket)
-        except ModelError as exc:
-            trace["interpret_error"] = str(exc)
-            return None  # Jev still reads the ticket itself
-        trace["requests_verified"] = len(interpretation.requests)
-        trace["quotes_dropped"] = dropped
-        trace["faq_ids"] = interpretation.faq_ids
-        return interpretation
+        with span("interpret") as stage:
+            try:
+                interpretation, dropped = self._deepseek.interpret(ticket)
+            except ModelError as exc:
+                stage.fail(str(exc))
+                trace["interpret_error"] = str(exc)
+                return None  # Jev still reads the ticket itself
+            trace["requests_verified"] = len(interpretation.requests)
+            trace["quotes_dropped"] = dropped
+            trace["faq_ids"] = interpretation.faq_ids
+            stage.set(
+                requests_verified=len(interpretation.requests),
+                quotes_dropped=dropped,
+                faq_ids=interpretation.faq_ids,
+                language_guess=interpretation.language_guess,
+                embedded_instructions=len(interpretation.embedded_instructions),
+            )
+            return interpretation
 
     def _decision_state(
         self, ticket: Ticket, interpretation: Interpretation | None
@@ -176,34 +211,39 @@ class Agent:
         if not interpretation.faq_ids:
             return "no FAQ section was cited"
         language = jev.language_code
-        try:
-            draft, reason = self._deepseek.write_reply(
-                language=language,
-                category=jev.category_code,
-                priority=jev.priority_code,
-                customer_plan=ticket.customer_plan,
-                requests=interpretation.requests,
-                faq_ids=interpretation.faq_ids,
-            )
-        except ModelError as exc:
-            return f"the writer failed ({exc})"
-        if contains_payment_details(draft):
-            return "the draft contained payment details"
+        with span("write_reply", faq_ids=interpretation.faq_ids) as stage:
+            try:
+                draft, reason = self._deepseek.write_reply(
+                    language=language,
+                    category=jev.category_code,
+                    priority=jev.priority_code,
+                    customer_plan=ticket.customer_plan,
+                    requests=interpretation.requests,
+                    faq_ids=interpretation.faq_ids,
+                )
+            except ModelError as exc:
+                stage.fail(str(exc))
+                return f"the writer failed ({exc})"
+            if contains_payment_details(draft):
+                stage.fail("draft contained payment details")
+                return "the draft contained payment details"
 
-        try:
-            scores = self._jev.verify_reply(
-                {
-                    "expected_language": LANGUAGE_NAMES[language],
-                    "faq_sections": self._faq.render(interpretation.faq_ids),
-                    "customer_requests": [r.text_en for r in interpretation.requests],
-                    "draft_reply": draft,
-                }
-            )
-        except ModelError as exc:
-            return f"verification failed ({exc})"
-        trace["verify"] = {name: round(value, 3) for name, value in scores.items()}
-
-        failure = reply_check_failure(scores, self._t)
+        with span("jev_verify") as stage:
+            try:
+                scores = self._jev.verify_reply(
+                    {
+                        "expected_language": LANGUAGE_NAMES[language],
+                        "faq_sections": self._faq.render(interpretation.faq_ids),
+                        "customer_requests": [r.text_en for r in interpretation.requests],
+                        "draft_reply": draft,
+                    }
+                )
+            except ModelError as exc:
+                stage.fail(str(exc))
+                return f"verification failed ({exc})"
+            trace["verify"] = {name: round(value, 3) for name, value in scores.items()}
+            failure = reply_check_failure(scores, self._t)
+            stage.set(scores=trace["verify"], passed=failure is None, failure=failure)
         if failure:
             return failure
 
@@ -229,12 +269,16 @@ class Agent:
         trace: dict[str, Any],
     ) -> Decision:
         summary = interpretation.english_summary if interpretation else ""
-        try:
-            note, reason = self._deepseek.write_handoff(
-                ticket, category=category, priority=priority, why=why, summary=summary
-            )
-        except ModelError as exc:
-            trace["handoff_writer_error"] = str(exc)
+        with span("write_handoff") as stage:
+            try:
+                note, reason = self._deepseek.write_handoff(
+                    ticket, category=category, priority=priority, why=why, summary=summary
+                )
+            except ModelError as exc:
+                stage.fail(str(exc))
+                note = ""
+        if not note:
+            trace["handoff_writer_error"] = "handoff writer failed"
             return self._templated_handoff(
                 ticket, interpretation, language, category, priority, why=why, confidence=confidence
             )
@@ -248,8 +292,8 @@ class Agent:
             confidence=round(confidence, 3),
         )
 
-    @staticmethod
     def _templated_handoff(
+        self,
         ticket: Ticket,
         interpretation: Interpretation | None,
         language: Language,
@@ -269,6 +313,8 @@ class Agent:
             f"Automatic triage could not finish: {why.rstrip('.')}. "
             f"Summary: {summary} Subject: '{ticket.subject}'. Please read the ticket."
         )
+        with span("templated_handoff", why=why):
+            pass
         return Decision(
             action="handoff",
             language=language,

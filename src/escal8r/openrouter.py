@@ -7,6 +7,7 @@ Every call records the model that actually served it and its cost.
 
 from __future__ import annotations
 
+import hashlib
 import json
 import logging
 import time
@@ -15,8 +16,10 @@ from typing import Any
 
 import httpx
 
+from escal8r import tracing
 from escal8r.config import MODEL_PRICES_PER_M, OPENROUTER_BASE_URL, PROVIDER_PREFERENCES
 from escal8r.helpdesk import Sleep, backoff_delay
+from escal8r.tracing import current_span
 
 log = logging.getLogger(__name__)
 
@@ -149,23 +152,31 @@ class OpenRouterClient:
             "usage": {"include": True},
             "provider": {**PROVIDER_PREFERENCES, "sort": "price"},
         }
+        prompt_version = hashlib.sha256(system.encode()).hexdigest()[:10]
         for attempt in range(JSON_ATTEMPTS):
-            response = self._post("/v1/chat/completions", body)
-            usage = response.get("usage") or {}
-            self._record(
-                purpose,
-                model,
-                response,
-                input_tokens=int(usage.get("prompt_tokens") or 0),
-                output_tokens=int(usage.get("completion_tokens") or 0),
-                reported_cost=usage.get("cost"),
-            )
-            try:
-                return parse_json_text(_message_content(response))
-            except ModelError as exc:
-                if attempt + 1 == JSON_ATTEMPTS:
-                    raise
-                log.warning("%s: %s; asking once more", purpose, exc)
+            with tracing.span(
+                "model_call", purpose=purpose, model_requested=model, prompt_version=prompt_version
+            ) as span:
+                tracing.record_text(span, "prompt", user)
+                response = self._post("/v1/chat/completions", body)
+                usage = response.get("usage") or {}
+                self._record(
+                    purpose,
+                    model,
+                    response,
+                    input_tokens=int(usage.get("prompt_tokens") or 0),
+                    output_tokens=int(usage.get("completion_tokens") or 0),
+                    reported_cost=usage.get("cost"),
+                )
+                try:
+                    content = _message_content(response)
+                    tracing.record_text(span, "output", content)
+                    return parse_json_text(content)
+                except ModelError as exc:
+                    if attempt + 1 == JSON_ATTEMPTS:
+                        raise
+                    span.fail(str(exc))
+                    log.warning("%s: %s; asking once more", purpose, exc)
         raise AssertionError("unreachable")
 
     def decide(
@@ -183,20 +194,23 @@ class OpenRouterClient:
             "questions": questions,
             "provider": dict(PROVIDER_PREFERENCES),
         }
-        response = self._post("/alpha/decisions", body)
-        usage = response.get("usage") or {}
-        self._record(
-            purpose,
-            model,
-            response,
-            input_tokens=int(usage.get("input_tokens") or 0),
-            output_tokens=int(usage.get("output_tokens") or 0),
-            reported_cost=usage.get("cost"),
-        )
-        answers = response.get("answers")
-        if not isinstance(answers, dict):
-            raise ModelError("decisions response has no answers map")
-        return answers
+        with tracing.span("model_call", purpose=purpose, model_requested=model) as span:
+            tracing.record_text(span, "state", json.dumps(state, ensure_ascii=False))
+            response = self._post("/alpha/decisions", body)
+            usage = response.get("usage") or {}
+            self._record(
+                purpose,
+                model,
+                response,
+                input_tokens=int(usage.get("input_tokens") or 0),
+                output_tokens=int(usage.get("output_tokens") or 0),
+                reported_cost=usage.get("cost"),
+            )
+            answers = response.get("answers")
+            if not isinstance(answers, dict):
+                raise ModelError("decisions response has no answers map")
+            span.set(answers=_compact_answers(answers))
+            return answers
 
     def list_models(self) -> list[dict[str, Any]]:
         self.tracker.check()
@@ -224,6 +238,17 @@ class OpenRouterClient:
         self.tracker.calls.append(
             CallRecord(purpose, model, served, input_tokens, output_tokens, cost, reported)
         )
+        span = current_span()
+        if span is not None and span.kind == "model_call":
+            span.set(
+                model_served=served,
+                generation_id=response.get("id"),
+                provider=response.get("provider"),
+                input_tokens=input_tokens,
+                output_tokens=output_tokens,
+                cost_usd=cost,
+                cost_reported=reported,
+            )
         if _undated(served) != _undated(model):
             log.warning("%s: asked for %s, served by %s", purpose, model, served)
 
@@ -233,12 +258,18 @@ class OpenRouterClient:
 
     def _request(self, method: str, path: str, body: dict[str, Any] | None) -> dict[str, Any]:
         last_error = ""
+        attempts: list[Any] = []
+        span = current_span()
+        if span is not None and span.kind == "model_call":
+            span.set(attempts=attempts)
         for attempt in range(self._max_attempts):
             try:
                 response = self._http.request(method, path, json=body)
             except httpx.TransportError as exc:
                 last_error = type(exc).__name__
+                attempts.append(last_error)
             else:
+                attempts.append(response.status_code)
                 if response.status_code < 400:
                     try:
                         value = response.json()
@@ -281,3 +312,19 @@ def _undated(model_id: str) -> str:
     """'typesafe/jev-1.14-20260917' -> 'typesafe/jev-1.14': compare models without snapshot."""
     head, sep, tail = model_id.rpartition("-")
     return head if sep and tail.isdigit() and len(tail) == 8 else model_id
+
+
+def _compact_answers(answers: dict[str, Any]) -> dict[str, Any]:
+    """Jev answers as numbers only: choice -> [option, confidence], noul -> probability."""
+    compact: dict[str, Any] = {}
+    for name, answer in answers.items():
+        if not isinstance(answer, dict):
+            continue
+        kind = answer.get("type")
+        if kind == "choice":
+            compact[name] = [answer.get("choice"), answer.get("confidence")]
+        elif kind == "noul":
+            compact[name] = answer.get("noul")
+        else:
+            compact[name] = kind
+    return compact

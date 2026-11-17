@@ -28,6 +28,8 @@ class TicketLog:
         decision: Decision | None = None,
         trace: dict[str, Any] | None = None,
         error: str | None = None,
+        *,
+        span_id: str | None = None,
     ) -> None:
         line: dict[str, Any] = {
             "ts": datetime.now(UTC).isoformat(timespec="seconds"),
@@ -35,6 +37,8 @@ class TicketLog:
             "ticket": ticket_id,
             "outcome": outcome,
         }
+        if span_id:
+            line["span"] = span_id  # root of this ticket's trail in traces/<run>.jsonl
         if decision is not None:
             line.update(
                 action=decision.action,
