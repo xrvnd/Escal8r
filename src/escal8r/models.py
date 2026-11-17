@@ -83,3 +83,12 @@ class Decision(BaseModel):
     def payload(self) -> dict[str, Any]:
         """Request body for POST /tickets/{id}/{action}."""
         return self.model_dump(exclude={"action"}, exclude_none=True)
+
+
+class Decided(BaseModel):
+    """A decision plus a text-free trace of how it was reached (for the log)."""
+
+    model_config = ConfigDict(frozen=True)
+
+    decision: Decision
+    trace: dict[str, Any] = Field(default_factory=dict)

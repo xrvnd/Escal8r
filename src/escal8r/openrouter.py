@@ -1,0 +1,255 @@
+"""Shared OpenRouter transport for both models: retries, cost tracking, budget guard.
+
+- Chat completions (DeepSeek) return JSON text that we parse.
+- The alpha Decisions endpoint (Jev) returns typed answers; see jev.py.
+Every call records the model that actually served it and its cost.
+"""
+
+from __future__ import annotations
+
+import json
+import logging
+import time
+from dataclasses import dataclass, field
+from typing import Any
+
+import httpx
+
+from escal8r.config import MODEL_PRICES_PER_M, OPENROUTER_BASE_URL, PROVIDER_PREFERENCES
+from escal8r.helpdesk import Sleep, backoff_delay
+
+log = logging.getLogger(__name__)
+
+RETRYABLE_STATUS = {408, 429, 500, 502, 503, 524, 529}
+DEFAULT_MAX_ATTEMPTS = 3
+DEFAULT_TIMEOUT_S = 90.0
+
+
+class ModelError(RuntimeError):
+    """A model call failed after retries, or returned something unusable."""
+
+
+class StopRun(RuntimeError):
+    """Stop processing further tickets (the remaining ones stay open)."""
+
+
+class BudgetExceeded(StopRun):
+    pass
+
+
+@dataclass(frozen=True)
+class CallRecord:
+    purpose: str
+    model_requested: str
+    model_served: str
+    input_tokens: int
+    output_tokens: int
+    cost_usd: float
+    cost_reported: bool  # False: estimated from list prices
+
+
+@dataclass
+class CostTracker:
+    limit_usd: float
+    calls: list[CallRecord] = field(default_factory=list)
+
+    @property
+    def spent_usd(self) -> float:
+        return sum(call.cost_usd for call in self.calls)
+
+    def check(self) -> None:
+        if self.spent_usd >= self.limit_usd:
+            raise BudgetExceeded(
+                f"model spend ${self.spent_usd:.4f} reached the ${self.limit_usd:.2f} limit"
+            )
+
+    def since(self, index: int) -> list[CallRecord]:
+        return self.calls[index:]
+
+
+def _estimate_cost(model: str, input_tokens: int, output_tokens: int) -> float:
+    price_in, price_out = MODEL_PRICES_PER_M.get(model, (0.0, 0.0))
+    return (input_tokens * price_in + output_tokens * price_out) / 1_000_000
+
+
+def parse_json_text(text: str) -> dict[str, Any]:
+    """Parse a model's JSON answer, tolerating a ```json fence around it."""
+    cleaned = text.strip()
+    if cleaned.startswith("```"):
+        cleaned = cleaned.split("\n", 1)[1] if "\n" in cleaned else ""
+        cleaned = cleaned.rsplit("```", 1)[0]
+    try:
+        value = json.loads(cleaned)
+    except json.JSONDecodeError as exc:
+        raise ModelError(f"model did not return valid JSON: {exc}") from exc
+    if not isinstance(value, dict):
+        raise ModelError("model JSON is not an object")
+    return value
+
+
+class OpenRouterClient:
+    def __init__(
+        self,
+        api_key: str,
+        tracker: CostTracker,
+        *,
+        transport: httpx.BaseTransport | None = None,
+        sleep: Sleep = time.sleep,
+        max_attempts: int = DEFAULT_MAX_ATTEMPTS,
+        timeout_s: float = DEFAULT_TIMEOUT_S,
+    ):
+        self.tracker = tracker
+        self._http = httpx.Client(
+            base_url=OPENROUTER_BASE_URL,
+            headers={"Authorization": f"Bearer {api_key}", "X-Title": "Escal8r"},
+            timeout=timeout_s,
+            transport=transport,
+        )
+        self._sleep = sleep
+        self._max_attempts = max_attempts
+
+    def close(self) -> None:
+        self._http.close()
+
+    def __enter__(self) -> OpenRouterClient:
+        return self
+
+    def __exit__(self, *exc_info: object) -> None:
+        self.close()
+
+    # -- endpoints -------------------------------------------------------------
+
+    def chat_json(
+        self,
+        model: str,
+        system: str,
+        user: str,
+        *,
+        purpose: str,
+        max_tokens: int,
+        temperature: float = 0.1,
+    ) -> dict[str, Any]:
+        """One chat completion whose answer must be a JSON object."""
+        body = {
+            "model": model,
+            "messages": [{"role": "system", "content": system}, {"role": "user", "content": user}],
+            "temperature": temperature,
+            "max_tokens": max_tokens,
+            "response_format": {"type": "json_object"},
+            "reasoning": {"enabled": False},  # thinking tokens are billed as output
+            "usage": {"include": True},
+            "provider": {**PROVIDER_PREFERENCES, "sort": "price"},
+        }
+        response = self._post("/v1/chat/completions", body)
+        usage = response.get("usage") or {}
+        self._record(
+            purpose,
+            model,
+            response,
+            input_tokens=int(usage.get("prompt_tokens") or 0),
+            output_tokens=int(usage.get("completion_tokens") or 0),
+            reported_cost=usage.get("cost"),
+        )
+        try:
+            content = response["choices"][0]["message"]["content"]
+        except (KeyError, IndexError, TypeError) as exc:
+            raise ModelError("chat completion has no message content") from exc
+        if not isinstance(content, str):
+            raise ModelError("chat completion content is not text")
+        return parse_json_text(content)
+
+    def decide(
+        self,
+        model: str,
+        state: Any,
+        questions: dict[str, dict[str, Any]],
+        *,
+        purpose: str,
+    ) -> dict[str, Any]:
+        """One Decisions call. Returns the raw `answers` map."""
+        body = {
+            "model": model,
+            "state": state,
+            "questions": questions,
+            "provider": dict(PROVIDER_PREFERENCES),
+        }
+        response = self._post("/alpha/decisions", body)
+        usage = response.get("usage") or {}
+        self._record(
+            purpose,
+            model,
+            response,
+            input_tokens=int(usage.get("input_tokens") or 0),
+            output_tokens=int(usage.get("output_tokens") or 0),
+            reported_cost=usage.get("cost"),
+        )
+        answers = response.get("answers")
+        if not isinstance(answers, dict):
+            raise ModelError("decisions response has no answers map")
+        return answers
+
+    def list_models(self) -> list[dict[str, Any]]:
+        self.tracker.check()
+        response = self._request("GET", "/v1/models", None)
+        data = response.get("data")
+        return data if isinstance(data, list) else []
+
+    # -- internals -------------------------------------------------------------
+
+    def _record(
+        self,
+        purpose: str,
+        model: str,
+        response: dict[str, Any],
+        *,
+        input_tokens: int,
+        output_tokens: int,
+        reported_cost: Any,
+    ) -> None:
+        reported = isinstance(reported_cost, int | float)
+        cost = (
+            float(reported_cost) if reported else _estimate_cost(model, input_tokens, output_tokens)
+        )
+        served = str(response.get("model") or model)
+        self.tracker.calls.append(
+            CallRecord(purpose, model, served, input_tokens, output_tokens, cost, reported)
+        )
+        if served.split("-20")[0] != model.split("-20")[0]:
+            log.warning("%s: asked for %s, served by %s", purpose, model, served)
+
+    def _post(self, path: str, body: dict[str, Any]) -> dict[str, Any]:
+        self.tracker.check()
+        return self._request("POST", path, body)
+
+    def _request(self, method: str, path: str, body: dict[str, Any] | None) -> dict[str, Any]:
+        last_error = ""
+        for attempt in range(self._max_attempts):
+            try:
+                response = self._http.request(method, path, json=body)
+            except httpx.TransportError as exc:
+                last_error = type(exc).__name__
+            else:
+                if response.status_code < 400:
+                    try:
+                        value = response.json()
+                    except ValueError as exc:
+                        raise ModelError(f"{path}: response is not JSON") from exc
+                    if not isinstance(value, dict):
+                        raise ModelError(f"{path}: response is not a JSON object")
+                    return value
+                last_error = f"HTTP {response.status_code} {_error_message(response)}"
+                if response.status_code not in RETRYABLE_STATUS:
+                    raise ModelError(f"{path}: {last_error}")
+            if attempt + 1 < self._max_attempts:
+                delay = backoff_delay(attempt + 1)
+                log.warning("%s: %s, retry in %.1fs", path, last_error, delay)
+                self._sleep(delay)
+        raise ModelError(f"{path}: failed after {self._max_attempts} attempts ({last_error})")
+
+
+def _error_message(response: httpx.Response) -> str:
+    try:
+        error = response.json().get("error", {})
+    except (ValueError, AttributeError):
+        return ""
+    return str(error.get("message", "")) if isinstance(error, dict) else str(error)

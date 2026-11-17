@@ -13,9 +13,24 @@ FAQ_PATH = PROJECT_ROOT / "knowledge" / "faq.md"
 STATE_DIR = PROJECT_ROOT / "state"
 LOG_DIR = PROJECT_ROOT / "logs"
 
+OPENROUTER_BASE_URL = "https://openrouter.ai/api"
+
 # Pinned model IDs (OpenRouter). Never use floating aliases: they can be rerouted.
 JEV_MODEL = "typesafe/jev-1.14"
 DEEPSEEK_MODEL = "deepseek/deepseek-v4-flash-20260731"
+
+# List prices in USD per 1M tokens (input, output), checked 16 Nov 2026. Only used to
+# estimate cost when a response does not report it; reported cost always wins.
+MODEL_PRICES_PER_M: dict[str, tuple[float, float]] = {
+    JEV_MODEL: (0.042, 0.0),
+    DEEPSEEK_MODEL: (0.0474, 0.45),
+}
+
+# Customer data from an EU client: ask OpenRouter to route only to providers that do
+# not store or train on prompts. This is not a zero-retention guarantee.
+PROVIDER_PREFERENCES: dict[str, str] = {"data_collection": "deny"}
+
+LANGUAGE_NAMES = {"nl": "Dutch", "en": "English", "de": "German"}
 
 # The helpdesk rejects more than 5 calls/s. At 4/s a sliding 1 s window can still hold
 # 5 calls (t = 0, .25, .5, .75, 1.0); 3.5/s keeps every window at 4 or fewer.
@@ -32,6 +47,8 @@ class Thresholds:
     answerable: float = 0.75  # FAQ answers the question
     covered: float = 0.75  # FAQ covers every request in the ticket
     grounded: float = 0.80  # every claim in the draft is supported by the FAQ
+    reply_language: float = 0.80  # draft is written in the customer's language
+    commitment: float = 0.35  # draft promises something the FAQ does not -> handoff
 
 
 class ConfigError(RuntimeError):
