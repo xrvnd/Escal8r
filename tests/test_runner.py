@@ -251,3 +251,18 @@ def test_one_log_line_per_ticket(tmp_path):
         ("T003", "posted"),
     ]
     assert lines[0]["trace"] == {"rule": "test"}
+
+
+def test_setup_error_posts_nothing_and_reports_why(store):
+    from escal8r.openrouter import SetupError
+
+    desk = FakeHelpdesk(["T001", "T002"])
+
+    def decide(ticket: Ticket) -> Decided:
+        raise SetupError("OpenRouter rejected /alpha/decisions: HTTP 404 model not found")
+
+    summary = run(desk, store, decide)
+    assert desk.answers == {}
+    assert summary.not_started == ["T001", "T002"]
+    assert "404" in summary.stopped
+    assert store.counts() == {"in_progress": 0, "done": 0, "failed": 0}

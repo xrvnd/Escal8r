@@ -26,7 +26,7 @@ from escal8r.evaluation import evaluate, format_report, save_report
 from escal8r.faq import load_faq
 from escal8r.helpdesk import HelpdeskClient
 from escal8r.jev import Jev
-from escal8r.openrouter import CostTracker, OpenRouterClient
+from escal8r.openrouter import CostTracker, OpenRouterClient, StopRun
 from escal8r.runner import reset_all, run
 from escal8r.state import StateError, StateStore
 from escal8r.ticketlog import TicketLog
@@ -93,6 +93,8 @@ def _cmd_run(settings: Settings, helpdesk: HelpdeskClient, store: StateStore, dr
     with _agent(settings) as (agent, tracker):
         summary = run(helpdesk, store, agent.decide, ticket_log=ticket_log, dry_run=dry_run)
     print(json.dumps({"counts": summary.counts(), "actions": summary.actions}, indent=2))
+    if summary.stopped:
+        print(f"RUN STOPPED: {summary.stopped}. {len(summary.not_started)} tickets left open.")
     print(_cost_line(tracker, sum(summary.actions.values())))
     print(f"log: {ticket_log.path.relative_to(PROJECT_ROOT)}")
     problems = summary.failed or summary.outcome_unknown or summary.not_started
@@ -165,4 +167,7 @@ def main(argv: list[str] | None = None) -> int:
     except (ConfigError, StateError) as exc:
         print(f"error: {exc}", file=sys.stderr)
         return 2
+    except StopRun as exc:  # eval or check-models hit a setup error or the budget
+        print(f"stopped: {exc}", file=sys.stderr)
+        return 3
     return 0

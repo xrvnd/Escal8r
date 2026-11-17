@@ -44,12 +44,17 @@ class RunSummary:
     skipped_done: list[str] = field(default_factory=list)
     outcome_unknown: list[str] = field(default_factory=list)
     failed: list[str] = field(default_factory=list)
-    not_started: list[str] = field(default_factory=list)  # run stopped early (budget)
+    not_started: list[str] = field(default_factory=list)  # run stopped early
     dry_run: dict[str, Decision] = field(default_factory=dict)
     actions: dict[str, int] = field(default_factory=dict)
+    stopped: str | None = None  # why the run stopped early, if it did
 
     def counts(self) -> dict[str, int]:
-        return {name: len(value) for name, value in vars(self).items() if name != "actions"}
+        return {
+            name: len(value)
+            for name, value in vars(self).items()
+            if name not in ("actions", "stopped")
+        }
 
 
 def run(
@@ -103,6 +108,7 @@ def _run(
                 decided = decide(ticket)
         except StopRun as exc:
             log.error("stopping run: %s", exc)
+            summary.stopped = str(exc)
             summary.not_started = [t.id for t in open_tickets[index:]]
             break
         except Exception as exc:

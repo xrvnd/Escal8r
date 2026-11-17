@@ -210,3 +210,16 @@ def test_reply_writer_failure_hands_off():
     decided = agent.decide(HOW_TO)
     assert decided.decision.action == "handoff"
     assert "writer failed" in decided.trace["reply_rejected"]
+
+
+def test_setup_error_is_not_swallowed_into_a_handoff():
+    from escal8r.openrouter import SetupError
+
+    agent, _, jev = make_agent()
+
+    def broken(state: dict):
+        raise SetupError("402 Insufficient credits")
+
+    jev.decide = broken
+    with pytest.raises(SetupError):
+        agent.decide(HOW_TO)

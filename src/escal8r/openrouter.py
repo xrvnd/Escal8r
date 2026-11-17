@@ -21,7 +21,12 @@ from escal8r.helpdesk import Sleep, backoff_delay
 log = logging.getLogger(__name__)
 
 RETRYABLE_STATUS = {408, 429, 500, 502, 503, 524, 529}
+# Our request shapes are fixed, so these mean a broken setup (bad key, no credits, unknown
+# model, rejected parameter or provider policy), not one bad ticket: stop the whole run
+# instead of quietly handing off every ticket.
+SETUP_ERROR_STATUS = {400, 401, 402, 403, 404}
 DEFAULT_MAX_ATTEMPTS = 3
+JSON_ATTEMPTS = 2  # one retry when a model returns malformed JSON
 DEFAULT_TIMEOUT_S = 90.0
 
 
@@ -35,6 +40,10 @@ class StopRun(RuntimeError):
 
 class BudgetExceeded(StopRun):
     pass
+
+
+class SetupError(StopRun):
+    """OpenRouter rejected the request itself (key, credits, model id, parameters)."""
 
 
 @dataclass(frozen=True)
@@ -140,23 +149,24 @@ class OpenRouterClient:
             "usage": {"include": True},
             "provider": {**PROVIDER_PREFERENCES, "sort": "price"},
         }
-        response = self._post("/v1/chat/completions", body)
-        usage = response.get("usage") or {}
-        self._record(
-            purpose,
-            model,
-            response,
-            input_tokens=int(usage.get("prompt_tokens") or 0),
-            output_tokens=int(usage.get("completion_tokens") or 0),
-            reported_cost=usage.get("cost"),
-        )
-        try:
-            content = response["choices"][0]["message"]["content"]
-        except (KeyError, IndexError, TypeError) as exc:
-            raise ModelError("chat completion has no message content") from exc
-        if not isinstance(content, str):
-            raise ModelError("chat completion content is not text")
-        return parse_json_text(content)
+        for attempt in range(JSON_ATTEMPTS):
+            response = self._post("/v1/chat/completions", body)
+            usage = response.get("usage") or {}
+            self._record(
+                purpose,
+                model,
+                response,
+                input_tokens=int(usage.get("prompt_tokens") or 0),
+                output_tokens=int(usage.get("completion_tokens") or 0),
+                reported_cost=usage.get("cost"),
+            )
+            try:
+                return parse_json_text(_message_content(response))
+            except ModelError as exc:
+                if attempt + 1 == JSON_ATTEMPTS:
+                    raise
+                log.warning("%s: %s; asking once more", purpose, exc)
+        raise AssertionError("unreachable")
 
     def decide(
         self,
@@ -214,7 +224,7 @@ class OpenRouterClient:
         self.tracker.calls.append(
             CallRecord(purpose, model, served, input_tokens, output_tokens, cost, reported)
         )
-        if served.split("-20")[0] != model.split("-20")[0]:
+        if _undated(served) != _undated(model):
             log.warning("%s: asked for %s, served by %s", purpose, model, served)
 
     def _post(self, path: str, body: dict[str, Any]) -> dict[str, Any]:
@@ -238,6 +248,8 @@ class OpenRouterClient:
                         raise ModelError(f"{path}: response is not a JSON object")
                     return value
                 last_error = f"HTTP {response.status_code} {_error_message(response)}"
+                if response.status_code in SETUP_ERROR_STATUS:
+                    raise SetupError(f"OpenRouter rejected {path}: {last_error}")
                 if response.status_code not in RETRYABLE_STATUS:
                     raise ModelError(f"{path}: {last_error}")
             if attempt + 1 < self._max_attempts:
@@ -253,3 +265,19 @@ def _error_message(response: httpx.Response) -> str:
     except (ValueError, AttributeError):
         return ""
     return str(error.get("message", "")) if isinstance(error, dict) else str(error)
+
+
+def _message_content(response: dict[str, Any]) -> str:
+    try:
+        content = response["choices"][0]["message"]["content"]
+    except (KeyError, IndexError, TypeError) as exc:
+        raise ModelError("chat completion has no message content") from exc
+    if not isinstance(content, str):
+        raise ModelError("chat completion content is not text")
+    return content
+
+
+def _undated(model_id: str) -> str:
+    """'typesafe/jev-1.14-20260917' -> 'typesafe/jev-1.14': compare models without snapshot."""
+    head, sep, tail = model_id.rpartition("-")
+    return head if sep and tail.isdigit() and len(tail) == 8 else model_id

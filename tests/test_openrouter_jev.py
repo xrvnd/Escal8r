@@ -19,6 +19,7 @@ from escal8r.openrouter import (
     CostTracker,
     ModelError,
     OpenRouterClient,
+    SetupError,
     parse_json_text,
 )
 
@@ -172,14 +173,33 @@ def test_gives_up_after_max_attempts():
 
 
 def test_non_retryable_error_fails_fast():
-    server = Server(httpx.Response(400, json={"error": {"message": "Invalid request"}}))
-    with client_for(server) as client, pytest.raises(ModelError, match="Invalid request"):
+    server = Server(httpx.Response(422, json={"error": {"message": "Unprocessable"}}))
+    with client_for(server) as client, pytest.raises(ModelError, match="Unprocessable"):
         client.chat_json(DEEPSEEK_MODEL, "s", "u", purpose="t", max_tokens=10)
     assert len(server.requests) == 1
 
 
+@pytest.mark.parametrize("status", [400, 401, 402, 403, 404])
+def test_setup_errors_stop_the_run_instead_of_failing_one_ticket(status):
+    error = {"error": {"code": status, "message": "No endpoints found matching your data policy"}}
+    server = Server(httpx.Response(status, json=error))
+    with client_for(server) as client, pytest.raises(SetupError, match="data policy"):
+        Jev(client).decide({})
+    assert len(server.requests) == 1
+    assert not issubclass(SetupError, ModelError)  # the agent must not swallow it
+
+
+def test_malformed_json_is_retried_once():
+    server = Server(chat_response("not json"), chat_response('{"ok": true}'))
+    with client_for(server) as client:
+        assert client.chat_json(DEEPSEEK_MODEL, "s", "u", purpose="t", max_tokens=10) == {
+            "ok": True
+        }
+        assert len(client.tracker.calls) == 2  # both attempts are paid for and counted
+
+
 def test_invalid_json_content_raises():
-    server = Server(chat_response("Sure! Here is the reply: Hoi"))
+    server = Server(*[chat_response("Sure! Here is the reply: Hoi")] * 2)
     with client_for(server) as client, pytest.raises(ModelError):
         client.chat_json(DEEPSEEK_MODEL, "s", "u", purpose="t", max_tokens=10)
 

@@ -88,3 +88,15 @@ def test_log_line_has_decision_but_no_text(tmp_path):
     assert lines[0]["ticket"] == "T005" and lines[0]["action"] == "reply"
     assert "Anouk" not in log.path.read_text()
     assert "4111" not in log.path.read_text()
+
+
+def test_eval_stops_on_setup_error_instead_of_scoring_fallbacks():
+    import pytest
+
+    from escal8r.openrouter import SetupError
+
+    def decide(ticket: Ticket) -> Decided:
+        raise SetupError("401 bad key")
+
+    with pytest.raises(SetupError):
+        evaluate([example("E01", "reply")], decide)

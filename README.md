@@ -18,7 +18,7 @@ uv run escal8r run                # add --dry-run to post nothing
 
 1. **Two models, strict roles.** DeepSeek V4 Flash (`deepseek-v4-flash-20260731`) only reads
    (ticket → requests with quotes, FAQ ids, English summary) and writes. Jev (`jev-1.14`) makes
-   every decision in one typed call: language, category, priority, 12 yes/no gates. Plain code
+   every decision in one typed call: language, category, priority, 10 yes/no gates. Plain code
    picks the action. Jev reads the redacted ticket itself, so an interpreter miss can't hide a
    refund or GDPR request.
 2. **Fixed, asymmetric thresholds, in order:** always-human gate (refund, cancellation, GDPR,
@@ -44,8 +44,9 @@ Key and email on every helpdesk call; one global limiter at 3.5 calls/s. **429**
 ticket done, never retried; a POST with a lost response is not retried. **Crash:** the decision is
 saved `in_progress` (atomic write) before posting, `done` after. On restart, `in_progress` but no
 longer open → done; still open → the same decision is re-sent. A file lock allows one run at a
-time. Tested with `kill -9` mid-run: 30 handled, 0 duplicates. Model failures → templated
-handoff; `MAX_RUN_COST_USD` stops a run. **Security:** secrets only from env (`.env` gitignored);
+time. Tested with `kill -9` mid-run against a local fake helpdesk: 30 handled, 0 duplicates.
+A failing model call → templated handoff for that ticket; a setup error (400/401/402/403/404:
+key, credits, model id, rejected parameter) or `MAX_RUN_COST_USD` stops the run, tickets left open. **Security:** secrets only from env (`.env` gitignored);
 `provider.data_collection: "deny"` on OpenRouter (no training/storage; not zero-retention); logs
 hold ids, decisions, scores and cost, never ticket or reply text.
 
