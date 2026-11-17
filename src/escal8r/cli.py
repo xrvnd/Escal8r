@@ -8,6 +8,8 @@ import logging
 import sys
 from collections.abc import Iterator
 from contextlib import contextmanager
+from datetime import UTC, datetime
+from pathlib import Path
 
 from escal8r.agent import Agent
 from escal8r.config import (
@@ -26,13 +28,16 @@ from escal8r.evaluation import evaluate, format_report, save_report
 from escal8r.faq import load_faq
 from escal8r.helpdesk import HelpdeskClient
 from escal8r.jev import Jev
+from escal8r.observability import check_run, format_check, latest_trace, load_trail, render_trail
 from escal8r.openrouter import CostTracker, OpenRouterClient, StopRun
 from escal8r.runner import reset_all, run
 from escal8r.state import StateError, StateStore
 from escal8r.ticketlog import TicketLog
+from escal8r.tracing import NULL_TRACER, Tracer
 
 STATE_FILE = STATE_DIR / "state.json"
 EVAL_DIR = PROJECT_ROOT / "eval" / "results"
+TRACE_DIR = PROJECT_ROOT / "traces"
 
 log = logging.getLogger("escal8r")
 
@@ -54,6 +59,16 @@ def _build_parser() -> argparse.ArgumentParser:
 
     commands.add_parser("check-models", help="confirm the pinned model IDs exist on OpenRouter")
 
+    trace = commands.add_parser("trace", help="show everything that happened to one ticket")
+    trace.add_argument("ticket", help="ticket id, e.g. T008 or E03")
+    trace.add_argument("--run", help="run id (default: the newest trail with this ticket)")
+    trace.add_argument("--text", action="store_true", help="also show redacted prompts/outputs")
+
+    check = commands.add_parser(
+        "trace-check", help="observability eval: is every ticket's trail complete?"
+    )
+    check.add_argument("--run", help="run id (default: the newest trail)")
+
     reset = commands.add_parser(
         "reset", help="re-open all practice tickets and clear local state (destroys the last run)"
     )
@@ -66,6 +81,10 @@ def _confirm(prompt: str) -> bool:
         return input(f"{prompt} [y/N] ").strip().lower() in {"y", "yes"}
     except EOFError:
         return False
+
+
+def _new_run_id(prefix: str = "") -> str:
+    return prefix + datetime.now(UTC).strftime("%Y%m%dT%H%M%SZ")
 
 
 @contextmanager
@@ -88,27 +107,71 @@ def _cost_line(tracker: CostTracker, tickets: int) -> str:
     )
 
 
-def _cmd_run(settings: Settings, helpdesk: HelpdeskClient, store: StateStore, dry_run: bool) -> int:
-    ticket_log = TicketLog(LOG_DIR)
+def _cmd_run(
+    settings: Settings,
+    helpdesk: HelpdeskClient,
+    store: StateStore,
+    tracer: Tracer,
+    dry_run: bool,
+) -> int:
+    ticket_log = TicketLog(LOG_DIR, run_id=tracer.run_id)
     with _agent(settings) as (agent, tracker):
-        summary = run(helpdesk, store, agent.decide, ticket_log=ticket_log, dry_run=dry_run)
+        summary = run(
+            helpdesk, store, agent.decide, ticket_log=ticket_log, tracer=tracer, dry_run=dry_run
+        )
     print(json.dumps({"counts": summary.counts(), "actions": summary.actions}, indent=2))
     if summary.stopped:
         print(f"RUN STOPPED: {summary.stopped}. {len(summary.not_started)} tickets left open.")
     print(_cost_line(tracker, sum(summary.actions.values())))
     print(f"log: {ticket_log.path.relative_to(PROJECT_ROOT)}")
+    print(f"trail: traces/{tracer.run_id}.jsonl  (escal8r trace <ticket> / trace-check)")
     problems = summary.failed or summary.outcome_unknown or summary.not_started
     return 1 if problems else 0
 
 
-def _cmd_eval(settings: Settings, helpdesk: HelpdeskClient, name: str) -> int:
+def _cmd_eval(settings: Settings, helpdesk: HelpdeskClient, tracer: Tracer, name: str) -> int:
     examples = helpdesk.examples()
     with _agent(settings) as (agent, _tracker):
-        report = evaluate(examples, agent.decide)
+        report = evaluate(examples, agent.decide, tracer)
     path = save_report(report, EVAL_DIR, name)
     print(format_report(report))
     print(f"\nsaved: {path.relative_to(PROJECT_ROOT)}")
+    print(f"trail: traces/{tracer.run_id}.jsonl")
     return 0
+
+
+def _trace_file(run_id: str | None, ticket_id: str | None = None) -> Path | None:
+    if run_id:
+        path = TRACE_DIR / f"{run_id}.jsonl"
+        return path if path.exists() else None
+    return latest_trace(TRACE_DIR, ticket_id) if TRACE_DIR.exists() else None
+
+
+def _cmd_trace(ticket_id: str, run_id: str | None, show_text: bool) -> int:
+    path = _trace_file(run_id, ticket_id)
+    if path is None:
+        print(f"no trail found for {ticket_id}", file=sys.stderr)
+        return 1
+    print(render_trail(load_trail(path), ticket_id, show_text=show_text))
+    return 0
+
+
+def _cmd_trace_check(run_id: str | None) -> int:
+    path = _trace_file(run_id)
+    if path is None:
+        print("no trail found; run `escal8r run` or `escal8r eval` first", file=sys.stderr)
+        return 1
+    log_path = LOG_DIR / f"run-{path.stem}.jsonl"
+    log_lines = (
+        [json.loads(line) for line in log_path.read_text(encoding="utf-8").splitlines() if line]
+        if log_path.exists()
+        else None  # eval runs have no ticket log
+    )
+    report = check_run(load_trail(path), log_lines)
+    saved = save_report(report, EVAL_DIR, f"observability-{path.stem}")
+    print(format_check(report))
+    print(f"\nsaved: {saved.relative_to(PROJECT_ROOT)}")
+    return 0 if report["failed"] == 0 else 1
 
 
 def _cmd_check_models(settings: Settings) -> int:
@@ -141,6 +204,18 @@ def main(argv: list[str] | None = None) -> int:
     for noisy in ("httpx", "httpcore"):
         logging.getLogger(noisy).setLevel(logging.WARNING)
 
+    # Local-only commands: read trails, need no keys, make no network calls.
+    if args.command == "trace":
+        return _cmd_trace(args.ticket, args.run, args.text)
+    if args.command == "trace-check":
+        return _cmd_trace_check(args.run)
+
+    tracer = NULL_TRACER
+    if args.command == "run":
+        tracer = Tracer(TRACE_DIR, _new_run_id())
+    elif args.command == "eval":
+        tracer = Tracer(TRACE_DIR, _new_run_id(f"eval-{args.name}-"))
+
     try:
         settings = load_settings()
         if args.command == "check-models":
@@ -152,9 +227,9 @@ def main(argv: list[str] | None = None) -> int:
                 print(json.dumps(report, indent=2, ensure_ascii=False))
                 return 0
             if args.command == "run":
-                return _cmd_run(settings, helpdesk, store, args.dry_run)
+                return _cmd_run(settings, helpdesk, store, tracer, args.dry_run)
             if args.command == "eval":
-                return _cmd_eval(settings, helpdesk, args.name)
+                return _cmd_eval(settings, helpdesk, tracer, args.name)
             if args.command == "reset":
                 if not args.yes and not _confirm(
                     "Re-open all practice tickets and clear local state? This erases the last run."

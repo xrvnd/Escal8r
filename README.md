@@ -12,6 +12,8 @@ uv run escal8r check-models       # pinned model IDs exist
 uv run escal8r eval --name baseline   # GET /examples, never posts
 uv run escal8r reset --yes        # re-open practice tickets + clear local state
 uv run escal8r run                # add --dry-run to post nothing
+uv run escal8r trace T008 --text  # everything that happened to one ticket (local, no keys)
+uv run escal8r trace-check        # observability eval: is every ticket's trail complete?
 ```
 
 ## Decisions
@@ -48,7 +50,10 @@ time. Tested with `kill -9` mid-run against a local fake helpdesk: 30 handled, 0
 A failing model call → templated handoff for that ticket; a setup error (400/401/402/403/404:
 key, credits, model id, rejected parameter) or `MAX_RUN_COST_USD` stops the run, tickets left open. **Security:** secrets only from env (`.env` gitignored);
 `provider.data_collection: "deny"` on OpenRouter (no training/storage; not zero-retention); logs
-hold ids, decisions, scores and cost, never ticket or reply text.
+hold ids, decisions, scores and cost, never ticket or reply text. **Observability:** each log
+line points to a local, gitignored trail (`traces/`): every stage, model call (served model,
+generation id, tokens, cost, retries, redacted prompt/output) and helpdesk attempt. `trace-check`
+asserts every trail is complete, reconciles costs with the log and finds no leaks.
 
 ## Eval and fix
 
