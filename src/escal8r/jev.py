@@ -58,11 +58,18 @@ DECISION_QUESTIONS: dict[str, dict[str, Any]] = {
     ),
     "priority": _choice(
         "How urgent is this ticket for the support team?",
+        # The brief's definitions, with their overlaps resolved (see README > Decisions):
+        # "money involved" vs "how-to" left price questions at ~0.4 confidence, and a single
+        # device failing read as "one customer blocked".
         {
-            "P1": "Many users blocked right now, or a security or legal risk.",
-            "P2": "One customer blocked, or money or the contract is involved.",
-            "P3": "Something is wrong or unclear, but there is a workaround.",
-            "P4": "No urgency: how-to questions, ideas, cosmetic issues.",
+            "P1": "Many users blocked right now (e.g. an outage), a security incident, or a "
+            "legal threat.",
+            "P2": "One customer cannot work and has no workaround; money is disputed (refund, "
+            "wrong or unexpected charge); a contract change such as a cancellation; or a "
+            "formal personal-data request.",
+            "P3": "Something is wrong or unclear but there is a workaround, or only some users "
+            "or devices are affected.",
+            "P4": "No urgency: how-to questions, price and plan questions, ideas, cosmetic issues.",
         },
     ),
     "refund_or_disputed_charge": _noul(
