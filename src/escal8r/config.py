@@ -17,13 +17,14 @@ OPENROUTER_BASE_URL = "https://openrouter.ai/api"
 
 # Pinned model IDs (OpenRouter). Never use floating aliases: they can be rerouted.
 JEV_MODEL = "typesafe/jev-1.14"
-DEEPSEEK_MODEL = "deepseek/deepseek-v4-flash-20260731"
+DEEPSEEK_MODEL = "deepseek/deepseek-v4-flash-0731"  # dated July release, verified on /v1/models
 
-# List prices in USD per 1M tokens (input, output), checked 16 Nov 2026. Only used to
-# estimate cost when a response does not report it; reported cost always wins.
+# List prices in USD per 1M tokens (input, output), from OpenRouter /v1/models on
+# 17 Nov 2026. Only used to estimate cost when a response does not report it;
+# reported cost always wins.
 MODEL_PRICES_PER_M: dict[str, tuple[float, float]] = {
     JEV_MODEL: (0.042, 0.0),
-    DEEPSEEK_MODEL: (0.0474, 0.45),
+    DEEPSEEK_MODEL: (0.06, 0.18),
 }
 
 # Customer data from an EU client: ask OpenRouter to route only to providers that do
