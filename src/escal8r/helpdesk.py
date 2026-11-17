@@ -18,6 +18,7 @@ import threading
 import time
 from collections.abc import Callable, Iterator
 from typing import Any
+from urllib.parse import quote
 
 import httpx
 
@@ -91,7 +92,7 @@ def backoff_delay(attempt: int, rng: Callable[[], float] = random.random) -> flo
 
     attempt 0 -> 0.25-0.5 s, 1 -> 0.5-1 s, 2 -> 1-2 s ... capped at 8 s.
     """
-    ceiling = min(BACKOFF_CAP_S, BACKOFF_BASE_S * 2**attempt)
+    ceiling = min(BACKOFF_CAP_S, BACKOFF_BASE_S * 2.0**attempt)
     return ceiling / 2 + rng() * ceiling / 2
 
 
@@ -167,7 +168,7 @@ class HelpdeskClient:
     # -- endpoints -------------------------------------------------------------
 
     def status(self) -> dict[str, Any]:
-        return self._request("GET", "/status")
+        return self._request_object("GET", "/status")
 
     def examples(self) -> list[Example]:
         return [Example.model_validate(item) for item in _items(self._request("GET", "/examples"))]
@@ -179,25 +180,33 @@ class HelpdeskClient:
             params: dict[str, Any] = {"limit": PAGE_SIZE, "status": status}
             if cursor:
                 params["cursor"] = cursor
-            page = self._request("GET", "/tickets", params=params)
+            page = self._request_object("GET", "/tickets", params=params)
             for item in _items(page):
                 yield Ticket.model_validate(item)
-            cursor = page.get("next_cursor") if isinstance(page, dict) else None
+            cursor = page.get("next_cursor")
             if not cursor:
                 return
 
     def get_ticket(self, ticket_id: str) -> dict[str, Any]:
         """One ticket plus how it was handled, if it was."""
-        return self._request("GET", f"/tickets/{ticket_id}")
+        return self._request_object("GET", f"/tickets/{quote(ticket_id, safe='')}")
 
     def post_decision(self, ticket_id: str, decision: Decision) -> dict[str, Any]:
         action: Action = decision.action
-        return self._request("POST", f"/tickets/{ticket_id}/{action}", json=decision.payload())
+        path = f"/tickets/{quote(ticket_id, safe='')}/{action}"
+        return self._request_object("POST", path, json=decision.payload())
 
     def reset_practice(self) -> dict[str, Any]:
-        return self._request("POST", "/practice/reset")
+        return self._request_object("POST", "/practice/reset")
 
     # -- transport -------------------------------------------------------------
+
+    def _request_object(self, method: str, path: str, **kwargs: Any) -> dict[str, Any]:
+        """Like `_request`, but the response must be a JSON object."""
+        body = self._request(method, path, **kwargs)
+        if not isinstance(body, dict):
+            raise ValueError(f"{method} {path}: expected a JSON object, got {type(body).__name__}")
+        return body
 
     def _request(
         self,

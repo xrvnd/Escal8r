@@ -17,8 +17,9 @@ LOG_DIR = PROJECT_ROOT / "logs"
 JEV_MODEL = "typesafe/jev-1.14"
 DEEPSEEK_MODEL = "deepseek/deepseek-v4-flash-20260731"
 
-# The helpdesk rejects more than 5 calls/s; stay safely below.
-HELPDESK_CALLS_PER_SECOND = 4.0
+# The helpdesk rejects more than 5 calls/s. At 4/s a sliding 1 s window can still hold
+# 5 calls (t = 0, .25, .5, .75, 1.0); 3.5/s keeps every window at 4 or fewer.
+HELPDESK_CALLS_PER_SECOND = 3.5
 
 
 @dataclass(frozen=True)

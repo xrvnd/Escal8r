@@ -25,8 +25,9 @@ def main(argv: list[str] | None = None) -> int:
         level=logging.DEBUG if args.verbose else logging.INFO,
         format="%(asctime)s %(levelname)s %(name)s: %(message)s",
     )
-    # httpx logs full request URLs at INFO; keep it quiet.
-    logging.getLogger("httpx").setLevel(logging.WARNING)
+    # HTTP libraries log URLs and connection details; keep them quiet even with -v.
+    for noisy in ("httpx", "httpcore"):
+        logging.getLogger(noisy).setLevel(logging.WARNING)
 
     try:
         settings = load_settings()
