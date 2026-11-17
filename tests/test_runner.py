@@ -266,3 +266,18 @@ def test_setup_error_posts_nothing_and_reports_why(store):
     assert summary.not_started == ["T001", "T002"]
     assert "404" in summary.stopped
     assert store.counts() == {"in_progress": 0, "done": 0, "failed": 0}
+
+
+def test_limit_handles_first_n_and_next_run_continues(store):
+    desk, decide = FakeHelpdesk(["T001", "T002", "T003", "T004"]), CountingDecider()
+    assert run(desk, store, decide, limit=2).posted == ["T001", "T002"]
+    assert run(desk, store, decide, limit=2).posted == ["T003", "T004"]
+    assert decide.calls == ["T001", "T002", "T003", "T004"]
+
+
+def test_limit_does_not_hide_tickets_from_recovery(store):
+    desk = FakeHelpdesk(["T001", "T002", "T003"])
+    desk.lose_response.add("T003")
+    run(desk, store, CountingDecider())  # T003 saved, response lost -> in_progress
+    summary = run(desk, store, CountingDecider(), limit=1)
+    assert summary.recovered == ["T003"]

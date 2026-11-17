@@ -66,13 +66,14 @@ def run(
     ticket_log: TicketLog | None = None,
     tracer: Tracer = NULL_TRACER,
     dry_run: bool = False,
+    limit: int | None = None,
 ) -> RunSummary:
-    """Handle every open ticket once. In dry-run mode nothing is posted or saved."""
+    """Handle every open ticket once (or the first `limit`). Dry-run posts and saves nothing."""
     logger: TicketLog | _NullLog = ticket_log or _NullLog()
     if dry_run:
-        return _run(client, store, decide, logger, tracer, dry_run=True)
+        return _run(client, store, decide, logger, tracer, dry_run=True, limit=limit)
     with store.exclusive():
-        return _run(client, store, decide, logger, tracer, dry_run=False)
+        return _run(client, store, decide, logger, tracer, dry_run=False, limit=limit)
 
 
 def _run(
@@ -83,6 +84,7 @@ def _run(
     tracer: Tracer,
     *,
     dry_run: bool,
+    limit: int | None,
 ) -> RunSummary:
     summary = RunSummary()
     with tracer.span("fetch_open") as span:
@@ -97,12 +99,14 @@ def _run(
             with tracer.span("ticket", ticket_id=ticket_id, outcome="recovered") as root:
                 logger.write(ticket_id, "recovered", span_id=root.span_id)
 
-    for index, ticket in enumerate(open_tickets):
+    # Recovery above needs the full open list; the limit only applies to new work.
+    batch = open_tickets if limit is None else open_tickets[:limit]
+    for index, ticket in enumerate(batch):
         with tracer.span("ticket", ticket_id=ticket.id) as root:
             stop = _handle(client, store, decide, logger, tracer, ticket, root, summary, dry_run)
         if stop:
             summary.stopped = stop
-            summary.not_started = [t.id for t in open_tickets[index:]]
+            summary.not_started = [t.id for t in batch[index:]]
             break
 
     log.info("run finished: %s actions=%s", summary.counts(), summary.actions)

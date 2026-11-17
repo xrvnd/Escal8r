@@ -53,6 +53,7 @@ def _build_parser() -> argparse.ArgumentParser:
     run_cmd.add_argument(
         "--dry-run", action="store_true", help="decide and log, but post and save nothing"
     )
+    run_cmd.add_argument("--limit", type=int, help="handle at most this many open tickets")
 
     eval_cmd = commands.add_parser("eval", help="score the agent on GET /examples (no posting)")
     eval_cmd.add_argument("--name", default="latest", help="results file name in eval/results/")
@@ -113,11 +114,18 @@ def _cmd_run(
     store: StateStore,
     tracer: Tracer,
     dry_run: bool,
+    limit: int | None,
 ) -> int:
     ticket_log = TicketLog(LOG_DIR, run_id=tracer.run_id)
     with _agent(settings) as (agent, tracker):
         summary = run(
-            helpdesk, store, agent.decide, ticket_log=ticket_log, tracer=tracer, dry_run=dry_run
+            helpdesk,
+            store,
+            agent.decide,
+            ticket_log=ticket_log,
+            tracer=tracer,
+            dry_run=dry_run,
+            limit=limit,
         )
     print(json.dumps({"counts": summary.counts(), "actions": summary.actions}, indent=2))
     if summary.stopped:
@@ -227,7 +235,7 @@ def main(argv: list[str] | None = None) -> int:
                 print(json.dumps(report, indent=2, ensure_ascii=False))
                 return 0
             if args.command == "run":
-                return _cmd_run(settings, helpdesk, store, tracer, args.dry_run)
+                return _cmd_run(settings, helpdesk, store, tracer, args.dry_run, args.limit)
             if args.command == "eval":
                 return _cmd_eval(settings, helpdesk, tracer, args.name)
             if args.command == "reset":
