@@ -58,18 +58,16 @@ since hosted models vary. Reports in [eval/results/](eval/results/).
 | Fix B: priority wording | 100% | 100% | 100% | 80% | 8 | 0 | 50% |
 | **Final** | 100% | 100% | 100% | 80% | 8 | 0 | 50% |
 
-**Fix A.** E05 (feature idea) and E10 (maintenance) were "not answerable", though the FAQ names
-where they go (F10, F11); directing the customer there now counts. **Fix B.** The brief's priority
-lines overlap ("money is involved" vs "how-to"), so E07 (price) and E01 (one device) were
-mis-prioritised. **Final** keeps that score with a sturdier design: priority computed from facts,
-routes that tag every handoff with a team, and a verifier that also knows the customer's plan
-(T015's correct "not on your Basis plan" draft had been rejected). **Practice tickets:** dry run
-12 replies / 16 handoffs / 2 closes (version A: 9/19/2); **final run 9/19/2**, all 30 posted, one 503
-retried, trail check 100%. Three drafts sit at the grounding edge (T015, T016, T022) and were
-safely handed off this time. Both prompt injections (T007, T030) were ignored.
-**Still missed:** E10's draft adds an unsupported claim (grounded 0.72–0.77). E01 sits on two
-edges: human-route mass 0.27–0.41 vs 0.35, and drafts grounded 0.56–0.70. E05 passed every final
-run but once fell just short (0.78 vs 0.80). **Cost: $0.026–0.028 per 100 tickets**; all runs ≈ $0.08.
+**Fix A.** E05 (idea) and E10 (maintenance) were "not answerable", though F10 and F11 say where
+they go. **Fix B.** The brief's priority lines overlap ("money is involved" vs "how-to"), so E07
+(price) and E01 (one device) got the wrong priority. **Final** keeps the score with priority computed
+from facts, team-tagged routes and a plan-aware verifier. **Still missed**, as safe handoffs: E10
+and E01 drafts under the 0.80 grounding bar; E01's human-route mass straddles 0.35.
+**Final run:** 9 replies / 19 handoffs / 2 closes, all 30 posted, one 503 retried, trail check 100%,
+both prompt injections (T007, T030) ignored.
+**Cost per 100 tickets:** the final run's 101 model calls (137,468 tokens in, 23,072 out) cost
+$0.00795 as reported by OpenRouter: $0.00795 / 30 × 100 = **$0.027** (other runs $0.026–0.028).
+All runs together ≈ $0.08.
 
 ## What I would improve
 
