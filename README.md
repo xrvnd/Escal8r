@@ -66,8 +66,10 @@ and E01 drafts under the 0.80 grounding bar; E01's human-route mass straddles 0.
 **Final run:** 9 replies / 19 handoffs / 2 closes, all 30 posted, one 503 retried, trail check 100%,
 both prompt injections (T007, T030) ignored.
 **Cost per 100 tickets:** the final run's 101 model calls (137,468 tokens in, 23,072 out) cost
-$0.00795 as reported by OpenRouter: $0.00795 / 30 × 100 = **$0.027** (other runs $0.026–0.028).
-All runs together ≈ $0.08.
+$0.00795 (€0.0069) as reported by OpenRouter: $0.00795 / 30 × 100 = **$0.027 (€0.023)** (other
+runs $0.026–0.028, €0.023–0.024). All runs together ≈ $0.08 (€0.07).
+
+*Note: € values use Wise's mid-market rate as of 19 Nov 2026, $1 USD = €0.8692 EUR.*
 
 ## What I would improve
 
