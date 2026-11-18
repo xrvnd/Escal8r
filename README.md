@@ -73,17 +73,26 @@ run but once fell just short (0.78 vs 0.80). **Cost: $0.026–0.028 per 100 tick
 
 ## What I would improve
 
-Every miss is a safe-side handoff: 0 unsafe in all runs, but 50% handoffs vs 30% in the labels.
-Next: reply more often without lowering any bar.
+Every miss is a safe-side handoff: 0 unsafe in all runs, but 50% handoffs vs 30% in the labels and
+19 of 30 in the final run. Next: reply more often without lowering any bar. Reading the final run's
+drafts and notes (`escal8r trace <id> --text`) shows where:
 
-1. **Repair the sentence, not the draft.** Jev returns a score, not a reason. Ask one yes/no per
-   draft sentence in the same call, rewrite only the failing one, verify again at 0.80 (E10, E05).
-2. **Steady decisions near a threshold.** Within ±0.05 of a line (E01: 0.27–0.41 vs 0.35), decide
-   again and average (≈ $0.00013 per Jev call); run the interpreter at temperature 0 too.
-3. **Mixed tickets:** a refund that also asks a how-to still goes to a human, but the note can
-   carry a verified draft for the FAQ part.
-4. **A bigger eval:** hand-label the 30 practice tickets (one of 10 examples is 10 points) and have
-   a Dutch speaker check tone and register (je/u).
+1. **The verifier rejects correct drafts.** T022 ("yes, German, under Profiel → Taal") matches F08
+   but scored grounded 0.77; T016 (F10 roadmap) 0.79 vs 0.80. Jev gives a score, not a reason: ask
+   one yes/no per sentence, rewrite only the failing one, verify again at 0.80 (also E10, E05).
+2. **A rejected draft becomes a wrong note.** Told the draft "made unsupported claims", the note
+   writer doubts the FAQ: T015's says no FAQ confirms Loket.nl (F04 does, on Plus), T022's asks a
+   human to check German exists (F08), T016's suggests a delivery "timeline" that F10 rules out.
+   Give the note writer the verified FAQ facts, and check notes the way replies are checked.
+3. **Category doubt blocks a reply.** T020 (Shopify POS; route F10 at 0.96) went to a human only
+   on category confidence 0.66 < 0.70. When every likely category gives the same action, skip it.
+4. **German customers get Dutch menus.** T029 says tap "Ruil aanbieden" with no gloss (T022 had
+   one). Always keep the FAQ's English gloss until the client gives German menu names.
+5. **Readable, measured replies.** Log an English back-translation of every reply, and score the
+   cited FAQ id in the eval, not only the four labels.
+6. **Steadier runs.** OpenRouter picks the cheapest provider per call: pin one, and re-decide within
+   ±0.05 of a line (E01: 0.27–0.41 vs 0.35). Then hand-label the 30 practice tickets and have a
+   Dutch speaker check register (je/u).
 
 **Brief change:** "P2: money is involved" also covers price questions the labels call P4 (E07);
 I'd say "money is *disputed*".
