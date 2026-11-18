@@ -236,3 +236,33 @@ def test_dated_jev_snapshot_counts_as_allowed():
     server = Server(decisions_response(jev_answers()))  # served typesafe/jev-1.14-20260917
     with client_for(server) as client:
         Jev(client).decide({})
+
+
+def test_writers_run_at_temperature_zero():
+    from escal8r.config import FAQ_PATH
+    from escal8r.deepseek import DeepSeek, Request
+    from escal8r.faq import load_faq
+    from escal8r.models import Ticket
+
+    server = Server(
+        chat_response('{"draft_reply": "Hoi", "reason": "F02"}'),
+        chat_response('{"handoff_note": "n", "reason": "r"}'),
+    )
+    with client_for(server) as client:
+        writer = DeepSeek(client, load_faq(FAQ_PATH))
+        writer.write_reply(
+            language="nl",
+            category="question",
+            priority="P4",
+            customer_plan="Basis",
+            requests=[Request(text_en="q", quote="q")],
+            faq_ids=["F02"],
+        )
+        writer.write_handoff(
+            Ticket(id="T1", subject="s", body="b"),
+            category="bug",
+            priority="P3",
+            why="w",
+            summary="s",
+        )
+    assert [server.body(i)["temperature"] for i in range(2)] == [0.0, 0.0]

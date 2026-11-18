@@ -160,7 +160,11 @@ class OpenRouterClient:
         prompt_version = hashlib.sha256(system.encode()).hexdigest()[:10]
         for attempt in range(JSON_ATTEMPTS):
             with tracing.span(
-                "model_call", purpose=purpose, model_requested=model, prompt_version=prompt_version
+                "model_call",
+                purpose=purpose,
+                model_requested=model,
+                prompt_version=prompt_version,
+                temperature=temperature,
             ) as span:
                 tracing.record_text(span, "prompt", user)
                 response = self._post("/v1/chat/completions", body)

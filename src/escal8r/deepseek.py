@@ -20,6 +20,10 @@ from escal8r.models import Ticket
 from escal8r.openrouter import ModelError, OpenRouterClient
 from escal8r.quotes import quote_in_text
 
+# Writers run at temperature 0: at 0.1 the same ticket sometimes got an extra unsupported
+# phrase that verification rejected (T016/T030 flipped between identical runs).
+WRITER_TEMPERATURE = 0.0
+
 INTERPRET_SYSTEM = """\
 You extract evidence from a customer support ticket for Roosterly, a shift-planning app.
 You do NOT decide anything: no category, priority or action.
@@ -162,7 +166,12 @@ class DeepSeek:
             f"<requests>{request_lines}</requests>"
         )
         data = self._client.chat_json(
-            self._model, system, user, purpose="deepseek_reply", max_tokens=450
+            self._model,
+            system,
+            user,
+            purpose="deepseek_reply",
+            max_tokens=450,
+            temperature=WRITER_TEMPERATURE,
         )
         return _text_field(data, "draft_reply"), _text_field(data, "reason")
 
@@ -182,6 +191,11 @@ class DeepSeek:
             f"<summary>{summary or 'none'}</summary>"
         )
         data = self._client.chat_json(
-            self._model, system, user, purpose="deepseek_handoff", max_tokens=300
+            self._model,
+            system,
+            user,
+            purpose="deepseek_handoff",
+            max_tokens=300,
+            temperature=WRITER_TEMPERATURE,
         )
         return _text_field(data, "handoff_note"), _text_field(data, "reason")
