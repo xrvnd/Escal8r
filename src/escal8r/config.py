@@ -53,12 +53,19 @@ class Thresholds:
 
     always_human: float = 0.35  # any always-human gate at/above this -> handoff
     spam: float = 0.85  # closing a real customer is costly, so spam must be clear
-    choice_confidence: float = 0.70  # language/category/priority confidence floor
+    choice_confidence: float = 0.70  # language/category confidence floor
     answerable: float = 0.75  # FAQ answers the question
     covered: float = 0.75  # FAQ covers every request in the ticket
     grounded: float = 0.80  # every claim in the draft is supported by the FAQ
     reply_language: float = 0.80  # draft is written in the customer's language
     commitment: float = 0.35  # draft promises something the FAQ does not -> handoff
+    # Routing over the whole distribution (grouped mass and margins).
+    human_route: float = 0.35  # all human_* routes together at/above this -> handoff
+    spam_route: float = 0.50  # spam route must agree with the spam gate to close
+    route_margin: float = 0.15  # best FAQ route must beat best human route by this
+    # Priority facts: a yes/no fact counts as true at/above this probability.
+    fact: float = 0.50
+    many_users: float = 1.5  # users_affected score: "a whole customer" or more
 
 
 class ConfigError(RuntimeError):

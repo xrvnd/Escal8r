@@ -3,7 +3,10 @@
 Jev makes every decision; it never writes text. Each call sends a `state` (the
 redacted ticket, interpreter evidence, FAQ and client rules) and typed questions:
 - choice: pick one option; the answer has `choice`, `probabilities`, `confidence`;
-- noul:   yes/no; the answer is one probability `noul` (0 = no, 1 = yes).
+- noul:   yes/no; the answer is one probability `noul` (0 = no, 1 = yes);
+- score:  a position on an ordered scale; the answer has `score` (probability-weighted
+          index), `probabilities` and `confidence`.
+Jev answers *facts*; plain code (rules.py) turns them into an action and a priority.
 An answer of type `refusal`, or any missing/invalid answer, raises ModelError so the
 agent hands the ticket to a human. The endpoint is alpha: this module is the only
 place that knows its shape (see tests/test_jev_contract.py).
@@ -15,7 +18,7 @@ from dataclasses import dataclass
 from typing import Any, cast
 
 from escal8r.config import JEV_MODEL
-from escal8r.models import Category, Language, Priority
+from escal8r.models import Category, Language
 from escal8r.openrouter import ModelError, OpenRouterClient
 
 UNTRUSTED_NOTE = (
@@ -41,6 +44,87 @@ def _choice(instructions: str, options: dict[str, str]) -> dict[str, Any]:
     return {"type": "choice", "instructions": instructions, "criteria": options}
 
 
+def _score(instructions: str, scale: list[str]) -> dict[str, Any]:
+    return {"type": "score", "instructions": instructions, "criteria": scale}
+
+
+@dataclass(frozen=True)
+class Route:
+    """Where a ticket goes. Built from the FAQ sections and the client's rules only."""
+
+    description: str
+    faq_ids: tuple[str, ...] = ()  # sections a reply may use (faq_* routes)
+    queue: str = ""  # team a handoff is transferred to (human_* routes)
+
+
+ROUTES: dict[str, Route] = {
+    "faq_account_access": Route("Logging in, forgotten password, password reset.", ("F01",)),
+    "faq_team_and_rota": Route(
+        "Adding employees, swapping shifts and approving swaps, adding locations.",
+        ("F02", "F03", "F07"),
+    ),
+    "faq_payroll_export": Route(
+        "How exporting approved hours to payroll works (Nmbrs, Loket.nl, AFAS, CSV) and which "
+        "plan includes it.",
+        ("F04",),
+    ),
+    "faq_plans_invoices": Route(
+        "Plan prices, upgrading, where invoices are, changing invoice details.", ("F05", "F06")
+    ),
+    "faq_app_and_languages": Route(
+        "App languages, supported iOS/Android versions, location permission for clocking in.",
+        ("F08", "F12"),
+    ),
+    "faq_data_location": Route("Where data is stored, the data processing agreement.", ("F09",)),
+    "faq_redirect": Route(
+        "Ideas and feature requests (public roadmap), or checking for outages and planned "
+        "maintenance (status page).",
+        ("F10", "F11"),
+    ),
+    "human_billing_dispute": Route(
+        "Refunds, disputed or unexpected charges, payment problems, changing the payment method.",
+        queue="Billing",
+    ),
+    "human_contract_change": Route(
+        "Cancelling, ending or changing the subscription or contract.", queue="Account management"
+    ),
+    "human_privacy_legal": Route(
+        "Personal-data requests (GDPR/AVG), legal threats, damages claims.", queue="Privacy & legal"
+    ),
+    "human_security": Route(
+        "Unknown logins, account takeover, leaked data, phishing.", queue="Security"
+    ),
+    "human_engineering": Route(
+        "Something in Roosterly is broken or wrong and the FAQ has no fix: errors, wrong data, "
+        "lost rotas, outages hitting the customer now.",
+        queue="Engineering",
+    ),
+    "human_other": Route(
+        "Needs a person but fits no other route, including threats to leave.", queue="Support"
+    ),
+    "spam": Route("Unsolicited marketing, scams, or content unrelated to Roosterly."),
+}
+FAQ_ROUTES = tuple(name for name in ROUTES if name.startswith("faq_"))
+HUMAN_ROUTES = tuple(name for name in ROUTES if name.startswith("human_"))
+
+# Queue for a handoff caused by an always-human gate.
+GATE_QUEUES = {
+    "refund_or_disputed_charge": "Billing",
+    "cancellation_or_contract_change": "Account management",
+    "personal_data_request": "Privacy & legal",
+    "legal_threat": "Privacy & legal",
+    "security_incident": "Security",
+    "churn_threat": "Account management",
+}
+
+USERS_AFFECTED_SCALE = [
+    "One person or one device.",
+    "Some users or devices at one customer.",
+    "A whole customer: all staff of a business or location.",
+    "Several customers at once.",
+]
+
+
 DECISION_QUESTIONS: dict[str, dict[str, Any]] = {
     "language": _choice(
         "Which language did the customer write the ticket in?",
@@ -56,21 +140,37 @@ DECISION_QUESTIONS: dict[str, dict[str, Any]] = {
             "other": "Spam, empty, personal-data requests, or anything that fits nothing else.",
         },
     ),
-    "priority": _choice(
-        "How urgent is this ticket for the support team?",
-        # The brief's definitions, with their overlaps resolved (see README > Decisions):
-        # "money involved" vs "how-to" left price questions at ~0.4 confidence, and a single
-        # device failing read as "one customer blocked".
-        {
-            "P1": "Many users blocked right now (e.g. an outage), a security incident, or a "
-            "legal threat.",
-            "P2": "One customer cannot work and has no workaround; money is disputed (refund, "
-            "wrong or unexpected charge); a contract change such as a cancellation; or a "
-            "formal personal-data request.",
-            "P3": "Something is wrong or unclear but there is a workaround, or only some users "
-            "or devices are affected.",
-            "P4": "No urgency: how-to questions, price and plan questions, ideas, cosmetic issues.",
-        },
+    "route": _choice(
+        "Where should this ticket go? Pick the route that fits the customer's main request.",
+        {name: route.description for name, route in ROUTES.items()},
+    ),
+    # Priority facts. rules.compute_priority applies the brief's P1-P4 table to them, so
+    # priority comes from the brief's own criteria rather than from tuned wording.
+    "users_affected": _score(
+        "How many people are affected by the problem in this ticket?", USERS_AFFECTED_SCALE
+    ),
+    "blocked_now": _noul(
+        "Is the customer's business unable to do essential work right now because of this "
+        "(plan or publish rotas, clock in, run payroll)?",
+        "Essential work is blocked right now.",
+        "Work can continue, even if something is wrong or a question is open.",
+    ),
+    "workaround_exists": _noul(
+        "Can the customer keep working another way (another device, a manual step, a "
+        "different screen) until this is solved?",
+        "A workaround exists or only something avoidable is affected.",
+        "There is no way to keep working.",
+    ),
+    "deadline_soon": _noul(
+        "Is a near deadline at stake because of this, such as a payroll run or shifts "
+        "starting today or tomorrow?",
+        "A near deadline is at stake.",
+        "No near deadline.",
+    ),
+    "cosmetic_only": _noul(
+        "Is the problem purely cosmetic (a typo, layout or wording) with no effect on work?",
+        "Purely cosmetic.",
+        "Affects work, data or money, or is not a problem at all.",
     ),
     "refund_or_disputed_charge": _noul(
         "Does the customer ask for money back, or dispute or question a charge or invoice amount?",
@@ -165,10 +265,17 @@ class ChoiceAnswer:
 
 
 @dataclass(frozen=True)
+class ScoreAnswer:
+    score: float  # probability-weighted position on the scale (0 = first item)
+    confidence: float
+
+
+@dataclass(frozen=True)
 class JevDecision:
     language: ChoiceAnswer
     category: ChoiceAnswer
-    priority: ChoiceAnswer
+    route: ChoiceAnswer
+    users_affected: ScoreAnswer
     gates: dict[str, float]  # every noul question, probability of "yes"
 
     # Typed views. Safe casts: parse_choice already rejected any unknown option.
@@ -181,24 +288,42 @@ class JevDecision:
         return cast(Category, self.category.choice)
 
     @property
-    def priority_code(self) -> Priority:
-        return cast(Priority, self.priority.choice)
-
-    @property
     def min_confidence(self) -> float:
-        return min(self.language.confidence, self.category.confidence, self.priority.confidence)
+        return min(self.language.confidence, self.category.confidence)
+
+    # Whole-distribution views of the route (method 4): grouped mass and margins.
+    def route_mass(self, names: tuple[str, ...]) -> float:
+        return sum(self.route.probabilities.get(name, 0.0) for name in names)
+
+    def best_route(self, names: tuple[str, ...]) -> tuple[str, float]:
+        return max(
+            ((name, self.route.probabilities.get(name, 0.0)) for name in names),
+            key=lambda item: item[1],
+        )
+
+    def route_margin(self) -> float:
+        """Best FAQ route minus best human route: small means torn between reply and human."""
+        return self.best_route(FAQ_ROUTES)[1] - self.best_route(HUMAN_ROUTES)[1]
 
     def summary(self) -> dict[str, Any]:
         """Numbers only, for the log."""
+        top_routes = sorted(self.route.probabilities.items(), key=lambda kv: -kv[1])[:3]
         return {
             "choices": {
                 name: {"choice": answer.choice, "confidence": round(answer.confidence, 3)}
                 for name, answer in (
                     ("language", self.language),
                     ("category", self.category),
-                    ("priority", self.priority),
+                    ("route", self.route),
                 )
             },
+            "route": {
+                "top": {name: round(p, 3) for name, p in top_routes},
+                "faq_mass": round(self.route_mass(FAQ_ROUTES), 3),
+                "human_mass": round(self.route_mass(HUMAN_ROUTES), 3),
+                "margin": round(self.route_margin(), 3),
+            },
+            "users_affected": round(self.users_affected.score, 2),
             "gates": {name: round(value, 3) for name, value in self.gates.items()},
         }
 
@@ -234,6 +359,14 @@ def parse_choice(answers: dict[str, Any], name: str, options: dict[str, str]) ->
     )
 
 
+def parse_score(answers: dict[str, Any], name: str, scale: list[str]) -> ScoreAnswer:
+    answer = _answer(answers, name, "score")
+    value = answer.get("score")
+    if not isinstance(value, int | float) or not 0.0 <= float(value) <= len(scale) - 1:
+        raise ModelError(f"Jev '{name}' score is off the scale: {value!r}")
+    return ScoreAnswer(float(value), _probability(answer.get("confidence"), f"{name}.confidence"))
+
+
 def parse_noul(answers: dict[str, Any], name: str) -> float:
     return _probability(_answer(answers, name, "noul").get("noul"), name)
 
@@ -261,7 +394,8 @@ class Jev:
         return JevDecision(
             language=parse_choice(answers, "language", DECISION_QUESTIONS["language"]["criteria"]),
             category=parse_choice(answers, "category", DECISION_QUESTIONS["category"]["criteria"]),
-            priority=parse_choice(answers, "priority", DECISION_QUESTIONS["priority"]["criteria"]),
+            route=parse_choice(answers, "route", DECISION_QUESTIONS["route"]["criteria"]),
+            users_affected=parse_score(answers, "users_affected", USERS_AFFECTED_SCALE),
             gates=_parse_nouls(answers, DECISION_QUESTIONS),
         )
 

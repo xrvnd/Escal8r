@@ -15,11 +15,17 @@ from typing import Any, cast
 from escal8r.config import LANGUAGE_NAMES, Thresholds
 from escal8r.deepseek import DeepSeek, Interpretation
 from escal8r.faq import Faq
-from escal8r.jev import Jev, JevDecision
+from escal8r.jev import ROUTES, Jev, JevDecision
 from escal8r.models import Category, Decided, Decision, Language, Priority, Ticket
 from escal8r.openrouter import CostTracker, ModelError
 from escal8r.redact import contains_payment_details, redact
-from escal8r.rules import pick_action, reply_check_failure
+from escal8r.rules import (
+    DEFAULT_QUEUE,
+    compute_priority,
+    pick_action,
+    reply_check_failure,
+    reply_sections,
+)
 from escal8r.tracing import record_text, span
 
 # Used only when Jev itself fails and gives us no classification.
@@ -124,16 +130,30 @@ class Agent:
             )
 
         trace["jev"] = jev.summary()
-        language, category, priority = jev.language_code, jev.category_code, jev.priority_code
-        confidence = jev.min_confidence
+        language, category = jev.language_code, jev.category_code
+        confidence = min(jev.min_confidence, jev.route.confidence)
         injection = jev.gates["injection_attempt"] >= INJECTION_THRESHOLD
 
         with span("rules") as stage:
+            priority, priority_why = compute_priority(jev, self._t)
             outcome = pick_action(
-                jev, self._t, has_requests=bool(interpretation and interpretation.requests)
+                jev,
+                self._t,
+                has_requests=bool(interpretation and interpretation.requests),
+                priority=priority,
             )
-            stage.set(rule=outcome.rule, action=outcome.action, why=outcome.why)
+            stage.set(
+                rule=outcome.rule,
+                action=outcome.action,
+                why=outcome.why,
+                route=outcome.route,
+                queue=outcome.queue,
+                priority=priority,
+                priority_why=priority_why,
+            )
         trace["rule"] = outcome.rule
+        trace["route"] = outcome.route
+        trace["priority_why"] = priority_why
 
         if outcome.action == "close":
             return Decision(
@@ -147,7 +167,7 @@ class Agent:
 
         why = outcome.why
         if outcome.action == "reply" and interpretation is not None:
-            reply = self._try_reply(interpretation, jev, safe, trace)
+            reply = self._try_reply(interpretation, jev, priority, outcome.route, safe, trace)
             if isinstance(reply, Decision):
                 if injection:
                     reply = reply.model_copy(update={"reason": reply.reason + INJECTION_NOTE})
@@ -157,9 +177,13 @@ class Agent:
             why = f"A draft reply was rejected: {reply}."
 
         note_why = why + (INJECTION_NOTE if injection else "")
-        return self._handoff(
+        queue = outcome.queue or ROUTES[outcome.route].queue or DEFAULT_QUEUE
+        decision = self._handoff(
             safe, interpretation, language, category, priority, note_why, confidence, trace
         )
+        # Transfer target first, so the support team sees where it belongs at a glance.
+        note = f"[{queue}] {decision.handoff_note}"
+        return decision.model_copy(update={"handoff_note": note})
 
     def _interpret(self, ticket: Ticket, trace: dict[str, Any]) -> Interpretation | None:
         with span("interpret") as stage:
@@ -204,22 +228,26 @@ class Agent:
         self,
         interpretation: Interpretation,
         jev: JevDecision,
+        priority: Priority,
+        route: str,
         ticket: Ticket,
         trace: dict[str, Any],
     ) -> Decision | str:
         """A verified reply, or the reason no reply may be sent."""
-        if not interpretation.faq_ids:
-            return "no FAQ section was cited"
+        sections = reply_sections(route, interpretation.faq_ids)
+        if sections is None:
+            return f"route {route} and the cited FAQ sections disagree"
+        trace["reply_sections"] = sections
         language = jev.language_code
-        with span("write_reply", faq_ids=interpretation.faq_ids) as stage:
+        with span("write_reply", faq_ids=sections) as stage:
             try:
                 draft, reason = self._deepseek.write_reply(
                     language=language,
                     category=jev.category_code,
-                    priority=jev.priority_code,
+                    priority=priority,
                     customer_plan=ticket.customer_plan,
                     requests=interpretation.requests,
-                    faq_ids=interpretation.faq_ids,
+                    faq_ids=sections,
                 )
             except ModelError as exc:
                 stage.fail(str(exc))
@@ -233,7 +261,7 @@ class Agent:
                 scores = self._jev.verify_reply(
                     {
                         "expected_language": LANGUAGE_NAMES[language],
-                        "faq_sections": self._faq.render(interpretation.faq_ids),
+                        "faq_sections": self._faq.render(sections),
                         "customer_requests": [r.text_en for r in interpretation.requests],
                         "draft_reply": draft,
                     }
@@ -251,10 +279,10 @@ class Agent:
             action="reply",
             language=language,
             category=jev.category_code,
-            priority=jev.priority_code,
+            priority=priority,
             reason=redact(reason),
             draft_reply=draft,
-            confidence=round(min(jev.min_confidence, scores["grounded"]), 3),
+            confidence=round(min(jev.min_confidence, jev.route.confidence, scores["grounded"]), 3),
         )
 
     def _handoff(

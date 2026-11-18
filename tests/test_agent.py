@@ -114,12 +114,11 @@ def test_trace_contains_no_ticket_or_reply_text():
 
 
 def test_refund_hands_off_without_writing_a_reply():
-    agent, deepseek, _ = make_agent(
-        jev={"decision": jev_decision(priority="P2", refund_or_disputed_charge=0.9)}
-    )
+    agent, deepseek, _ = make_agent(jev={"decision": jev_decision(refund_or_disputed_charge=0.9)})
     decision = agent.decide(HOW_TO).decision
     assert decision.action == "handoff"
-    assert decision.handoff_note == "Customer wants a refund for August."
+    assert decision.priority == "P2"  # computed: money is disputed
+    assert decision.handoff_note == "[Billing] Customer wants a refund for August."
     assert "write_reply" not in deepseek.called
 
 
@@ -132,7 +131,11 @@ def test_empty_ticket_closes_without_model_calls():
 
 
 def test_spam_closes():
-    agent, _, _ = make_agent(jev={"decision": jev_decision(spam=0.97, answerable=0.0)})
+    agent, _, _ = make_agent(
+        jev={
+            "decision": jev_decision(spam=0.97, answerable=0.0, route_probabilities={"spam": 0.95})
+        }
+    )
     decision = agent.decide(HOW_TO).decision
     assert decision.action == "close" and decision.confidence == 0.97
 
@@ -179,7 +182,7 @@ def test_payment_details_in_draft_are_rejected():
 def test_models_only_see_redacted_payment_details():
     ticket = HOW_TO.model_copy(update={"body": "Nieuwe kaart: 4111 1111 1111 1111, CVC 123"})
     agent, deepseek, jev = make_agent(
-        jev={"decision": jev_decision(priority="P2", cancellation_or_contract_change=0.8)}
+        jev={"decision": jev_decision(cancellation_or_contract_change=0.8)}
     )
     decided = agent.decide(ticket)
     assert decided.trace["payment_details_redacted"] is True
@@ -197,11 +200,12 @@ def test_injection_is_noted_and_ignored():
 def test_handoff_writer_failure_uses_template():
     agent, _, _ = make_agent(
         ds={"fail": {"write_handoff"}},
-        jev={"decision": jev_decision(priority="P1", security_incident=0.9)},
+        jev={"decision": jev_decision(security_incident=0.9)},
     )
     decision = agent.decide(HOW_TO).decision
     assert decision.action == "handoff"
     assert decision.priority == "P1"
+    assert decision.handoff_note.startswith("[Security] Automatic triage")
     assert "Wants to add an employee." in decision.handoff_note
 
 
@@ -223,3 +227,29 @@ def test_setup_error_is_not_swallowed_into_a_handoff():
     jev.decide = broken
     with pytest.raises(SetupError):
         agent.decide(HOW_TO)
+
+
+def test_reply_uses_route_sections_when_interpreter_cites_none():
+    agent, deepseek, jev = make_agent(
+        jev={"decision": jev_decision(route_probabilities={"faq_redirect": 0.9})}
+    )
+    deepseek.interpret = lambda ticket: (
+        Interpretation(
+            english_summary="An idea.",
+            requests=[Request(text_en="Add dark mode", quote="Hoe voeg ik")],
+            faq_ids=[],
+        ),
+        0,
+    )
+    decided = agent.decide(HOW_TO)
+    assert decided.decision.action == "reply"
+    assert decided.trace["reply_sections"] == ["F10", "F11"]
+
+
+def test_route_and_evidence_disagreeing_hands_off():
+    agent, _, _ = make_agent(
+        jev={"decision": jev_decision(route_probabilities={"faq_redirect": 0.9})}
+    )  # interpreter cites F02, the route allows F10/F11
+    decided = agent.decide(HOW_TO)
+    assert decided.decision.action == "handoff"
+    assert "disagree" in decided.trace["reply_rejected"]

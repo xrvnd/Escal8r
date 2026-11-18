@@ -9,7 +9,7 @@ from __future__ import annotations
 import pytest
 
 from escal8r.config import load_settings
-from escal8r.jev import ALWAYS_HUMAN_GATES, Jev
+from escal8r.jev import ALWAYS_HUMAN_GATES, ROUTES, Jev
 from escal8r.openrouter import CostTracker, OpenRouterClient
 
 SYNTHETIC_TICKET = {
@@ -37,6 +37,9 @@ def test_decisions_endpoint_contract():
     assert decision.language_code == "en"
     assert set(ALWAYS_HUMAN_GATES) <= set(decision.gates)
     assert decision.gates["refund_or_disputed_charge"] > 0.5
+    assert decision.route.choice in ROUTES and decision.route.probabilities
+    assert 0.0 <= decision.users_affected.score <= 3.0
+    print(f"\nroute={decision.summary()['route']} users_affected={decision.users_affected}")
     call = tracker.calls[0]
     print(
         f"\nserved by {call.model_served}; cost reported: {call.cost_reported} "

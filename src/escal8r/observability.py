@@ -133,6 +133,12 @@ def _describe(span: Span) -> str:
         raised = {k: v for k, v in attrs["gates"].items() if v >= 0.3}
         choices = {k: f"{v['choice']}@{v['confidence']}" for k, v in attrs["choices"].items()}
         text = f"choices={choices} gates≥0.3={raised}"
+        if "route" in attrs:
+            route = attrs["route"]
+            text += (
+                f" route={route['top']} human_mass={route['human_mass']} "
+                f"margin={route['margin']} users_affected={attrs.get('users_affected')}"
+            )
     return text
 
 

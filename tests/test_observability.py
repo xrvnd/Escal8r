@@ -80,10 +80,7 @@ def fake_openrouter() -> httpx.MockTransport:
             }
         else:
             refund = "terug" in body["state"]["ticket"]["body"]
-            answers = jev_answers(
-                priority="P2" if refund else "P4",
-                refund_or_disputed_charge=0.9 if refund else 0.02,
-            )
+            answers = jev_answers(refund_or_disputed_charge=0.9 if refund else 0.02)
         return httpx.Response(
             200,
             json={
