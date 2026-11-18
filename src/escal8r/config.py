@@ -65,7 +65,9 @@ class Thresholds:
     route_margin: float = 0.15  # best FAQ route must beat best human route by this
     # Priority facts: a yes/no fact counts as true at/above this probability.
     fact: float = 0.50
-    many_users: float = 1.5  # users_affected score: "a whole customer" or more
+    # users_affected score for P1 "many users": several customers. The brief keeps
+    # "one customer blocked" at P2, and 1.5 ("a whole customer") made E06 a P1.
+    many_users: float = 2.5
 
 
 class ConfigError(RuntimeError):

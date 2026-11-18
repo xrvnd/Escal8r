@@ -108,7 +108,8 @@ def test_threshold_edges():
     [
         ({"security_incident": 0.9}, "P1"),
         ({"legal_threat": 0.9}, "P1"),
-        ({"users_affected": 2.0, "blocked_now": 0.9}, "P1"),
+        ({"users_affected": 3.0, "blocked_now": 0.9}, "P1"),  # several customers
+        ({"users_affected": 2.0, "blocked_now": 0.9}, "P2"),  # one whole customer
         ({"refund_or_disputed_charge": 0.9}, "P2"),
         ({"cancellation_or_contract_change": 0.9}, "P2"),
         ({"churn_threat": 0.9}, "P2"),
