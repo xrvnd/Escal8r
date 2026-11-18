@@ -63,8 +63,10 @@ where they go (F10, F11); directing the customer there now counts. **Fix B.** Th
 lines overlap ("money is involved" vs "how-to"), so E07 (price) and E01 (one device) were
 mis-prioritised. **Final** keeps that score with a sturdier design: priority computed from facts,
 routes that tag every handoff with a team, and a verifier that also knows the customer's plan
-(T015's correct "not on your Basis plan" draft had been rejected). **Practice tickets** (dry run):
-12 replies, 16 handoffs, 2 closes, was 9/19/2; both prompt injections (T007, T030) ignored.
+(T015's correct "not on your Basis plan" draft had been rejected). **Practice tickets:** dry run
+12 replies / 16 handoffs / 2 closes (version A: 9/19/2); **final run 9/19/2**, all 30 posted, one 503
+retried, trail check 100%. Three drafts sit at the grounding edge (T015, T016, T022) and were
+safely handed off this time. Both prompt injections (T007, T030) were ignored.
 **Still missed:** E10's draft adds an unsupported claim (grounded 0.72–0.77). E01 sits on two
 edges: human-route mass 0.27–0.41 vs 0.35, and drafts grounded 0.56–0.70. E05 passed every final
 run but once fell just short (0.78 vs 0.80). **Cost: $0.026–0.028 per 100 tickets**; all runs ≈ $0.08.

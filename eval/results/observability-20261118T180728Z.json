@@ -1,0 +1,57 @@
+{
+  "run": "20261118T180728Z",
+  "tickets": 30,
+  "assertions": 1119,
+  "failed": 0,
+  "score": 1.0,
+  "checks": {
+    "log_matches_trail": {
+      "description": "one log line per ticket, pointing at its trail root",
+      "passed": 60,
+      "failed": 0,
+      "failures": []
+    },
+    "stages_complete": {
+      "description": "every stage the ticket's path requires is in its trail",
+      "passed": 30,
+      "failed": 0,
+      "failures": []
+    },
+    "model_calls_complete": {
+      "description": "every model call records model, tokens and cost",
+      "passed": 202,
+      "failed": 0,
+      "failures": []
+    },
+    "posts_traced": {
+      "description": "every posted decision has its helpdesk call and attempts",
+      "passed": 30,
+      "failed": 0,
+      "failures": []
+    },
+    "cost_reconciles": {
+      "description": "trail model costs equal the cost in the log line",
+      "passed": 30,
+      "failed": 0,
+      "failures": []
+    },
+    "failures_explained": {
+      "description": "every failure or non-success outcome carries a cause",
+      "passed": 0,
+      "failed": 0,
+      "failures": []
+    },
+    "tree_intact": {
+      "description": "no orphan spans; children share ticket and fit in parent's time",
+      "passed": 352,
+      "failed": 0,
+      "failures": []
+    },
+    "no_leaks": {
+      "description": "no text fields in the log; no payment details in log or trail",
+      "passed": 415,
+      "failed": 0,
+      "failures": []
+    }
+  }
+}
