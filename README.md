@@ -1,77 +1,87 @@
 # Escal8r
 
-Reads every open Roosterly helpdesk ticket and posts one decision: **reply** (FAQ-only draft in the
-customer's language), **handoff** (English note) or **close** (spam, empty).
+Reads every open Roosterly helpdesk ticket and posts one decision: **reply** (only from `faq.md`,
+in the customer's language), **handoff** (English note, tagged with a team) or **close** (spam, empty).
 
 ## How to run
 
 ```bash
-cp .env.example .env              # API_KEY, CANDIDATE_EMAIL, OPENROUTER_KEY
-uv sync && uv run pytest          # offline tests
-uv run escal8r check-models       # pinned model IDs exist
-uv run escal8r eval --name baseline   # GET /examples, never posts
-uv run escal8r reset --yes        # re-open practice tickets + clear local state
-uv run escal8r run                # add --dry-run to post nothing
-uv run escal8r trace T008 --text  # everything that happened to one ticket (local, no keys)
-uv run escal8r trace-check        # observability eval: is every ticket's trail complete?
+cp .env.example .env                 # API_KEY, API_URL, CANDIDATE_EMAIL, OPENROUTER_KEY
+uv sync && uv run pytest             # offline tests
+uv run escal8r eval --name final     # GET /examples only, never posts
+uv run escal8r run --dry-run --all   # decide every ticket, post nothing
+uv run escal8r reset --yes && uv run escal8r run
+uv run escal8r trace T008 --text     # what happened to one ticket (local, redacted)
+uv run escal8r trace-check           # is every ticket's trail complete?
 ```
 
 ## Decisions
 
-1. **Two models, strict roles.** DeepSeek V4 Flash (`deepseek-v4-flash-20260731`) only reads
-   (ticket → requests with quotes, FAQ ids, English summary) and writes. Jev (`jev-1.14`) makes
-   every decision in one typed call: language, category, priority, 10 yes/no gates. Plain code
-   picks the action. Jev reads the redacted ticket itself, so an interpreter miss can't hide a
-   refund or GDPR request.
-2. **Fixed, asymmetric thresholds, in order:** always-human gate (refund, cancellation, GDPR,
-   security, legal, threat to leave) ≥ 0.35 → handoff; spam ≥ 0.85 → close; any confidence < 0.70
-   → handoff; P1/P2 → handoff (policy); answerable and covered ≥ 0.75 → reply. Missing a
-   human-only ticket costs most, so those gates trip low. Not tuned: 10 examples would overfit.
-3. **Safety before posting.** Cards (Luhn), IBANs (mod-97) and CVCs are masked before any model
-   call and on every output. Ticket text is untrusted data in every prompt; injected commands are
-   ignored and noted in `reason`.
+1. **Two models, strict roles.** DeepSeek V4 Flash (`deepseek-v4-flash-0731`) only reads (requests
+   with verified quotes, cited FAQ ids) and writes (temperature 0). Jev (`jev-1.14`) decides, in
+   one typed call on the redacted ticket: language, category, a **route** over 14 buckets (7 FAQ
+   topics, 6 human teams, spam), priority facts and 10 yes/no gates. Plain code does the rest.
+2. **Priority is computed.** Jev answers facts (users affected, blocked now, workaround, deadline,
+   cosmetic, risk gates); code applies the brief's P1–P4 table.
+3. **Action rules, in order:** always-human gate (refund, cancellation, GDPR, security, legal,
+   threat to leave) ≥ 0.35 → handoff; close only if spam gate *and* spam route agree; language or
+   category confidence < 0.70 → handoff; P1/P2 → handoff; the route is judged by its whole
+   distribution, not its top confidence: human routes ≥ 0.35 together, or FAQ beats human by
+   < 0.15 → handoff; answerable and covered ≥ 0.75 → reply. Fixed, asymmetric, not tuned.
+4. **Every reply is checked.** Jev sees what the writer saw (FAQ sections, customer plan, requests)
+   and scores the draft: grounded (≥ 0.80), right language (≥ 0.80), no promise beyond the FAQ
+   (< 0.35); else handoff. Cards, IBANs and CVCs are masked before any model and on every output.
+   Ticket text is data; injected commands are ignored and noted.
 
-**Dutch.** Worked in directly, no translate step. The reply writer sees only verified requests and
-cited FAQ sections. Jev then checks the draft: claims supported by those sections (≥ 0.80), right
-language (≥ 0.80), no promise beyond the FAQ (< 0.35). Any failure → handoff. Interpreter quotes
-must appear in the ticket, which catches invented evidence.
-**AI tools:** built with Claude Code (planning, code, tests, offline rehearsal); I made and
-reviewed the design choices. **Assumptions:** empty body → close as nl/other/P4; asking *how* to
-upgrade is a how-to, not a contract change; if Jev fails → handoff as other/P3.
+**Dutch** is handled directly. **Assumptions:** no body and no subject beyond "Re:" → close; a
+subject alone ("Refund please") is decided normally; a model failure → handoff. **AI tools:**
+built with Claude Code; I made and reviewed the design choices.
 
 ## Reliability
 
-Key and email on every helpdesk call; one global limiter at 3.5 calls/s. **429** waits
-`Retry-After`; **503** backs off exponentially with jitter (nothing was saved); **409** marks the
-ticket done, never retried; a POST with a lost response is not retried. **Crash:** the decision is
-saved `in_progress` (atomic write) before posting, `done` after. On restart, `in_progress` but no
-longer open → done; still open → the same decision is re-sent. A file lock allows one run at a
-time. Tested with `kill -9` mid-run against a local fake helpdesk: 30 handled, 0 duplicates.
-A failing model call → templated handoff for that ticket; a setup error (400/401/402/403/404:
-key, credits, model id, rejected parameter) or `MAX_RUN_COST_USD` stops the run, tickets left open. **Security:** secrets only from env (`.env` gitignored);
-`provider.data_collection: "deny"` on OpenRouter (no training/storage; not zero-retention); logs
-hold ids, decisions, scores and cost, never ticket or reply text. **Observability:** each log
-line points to a local, gitignored trail (`traces/`): every stage, model call (served model,
-generation id, tokens, cost, retries, redacted prompt/output) and helpdesk attempt. `trace-check`
-asserts every trail is complete, reconciles costs with the log and finds no leaks.
+Global limiter at 3.5 calls/s. **429** waits `Retry-After`; **503** backs off with jitter;
+**409** marks the ticket done; a POST with a lost response is never blindly re-sent. **Crash-safe:**
+the decision is saved (atomic write) before posting; on restart, a ticket still open gets the
+*saved* decision. A file lock allows one run at a time; `kill -9` mid-run against a fake helpdesk
+gave 0 duplicates. A bad key or model id, or `MAX_RUN_COST_USD`, stops the run. Secrets only from
+env. `logs/` has one line per ticket, no text; each links to a local, gitignored trail in `traces/`.
 
 ## Eval and fix
 
-10 labelled examples from `GET /examples`; labels never reach the models. Full output in
-[eval/results/](eval/results/).
+10 labelled examples from `GET /examples`; labels never reach a model. Two or more runs per version,
+since hosted models vary. Reports in [eval/results/](eval/results/).
 
-| Run | lang | category | priority | action | unsafe replies | handoff rate |
-|---|---|---|---|---|---|---|
-| Baseline | _tbd_ | _tbd_ | _tbd_ | _tbd_ | _tbd_ | _tbd_ |
-| After fix | _tbd_ | _tbd_ | _tbd_ | _tbd_ | _tbd_ | _tbd_ |
+| Version | lang | cat | priority | action | all correct | unsafe | handoffs |
+|---|---|---|---|---|---|---|---|
+| Baseline | 100% | 100% | 80% | 50–60% | 4–5 | 0 | 70–80% |
+| Fix A: FAQ redirects | 100% | 100% | 80% | 60–70% | 5–6 | 0 | 60–70% |
+| Fix B: priority wording | 100% | 100% | 100% | 80% | 8 | 0 | 50% |
+| **Final** | 100% | 100% | 100% | 80% | 8 | 0 | 50% |
 
-**Fix:** _chosen after the baseline._
-**Cost per 100 tickets** (list prices; replace with measured): interpret 100 × (1.8k in × $0.0474/M
-+ 0.3k out × $0.45/M) = $0.022 · Jev 100 × 2.2k × $0.042/M = $0.009 · write 95 × (0.8k in + 0.22k
-out) = $0.013 · verify 40 × 0.9k = $0.002 → **≈ $0.046**.
+**Fix A.** E05 (feature idea) and E10 (maintenance) were "not answerable", though the FAQ names
+where they go (F10, F11); directing the customer there now counts. **Fix B.** The brief's priority
+lines overlap ("money is involved" vs "how-to"), so E07 (price) and E01 (one device) were
+mis-prioritised. **Final** keeps that score with a sturdier design: priority computed from facts,
+routes that tag every handoff with a team, and a verifier that also knows the customer's plan
+(T015's correct "not on your Basis plan" draft had been rejected). **Practice tickets** (dry run):
+12 replies, 16 handoffs, 2 closes, was 9/19/2; both prompt injections (T007, T030) ignored.
+**Still missed:** E10's draft adds an unsupported claim (grounded 0.72–0.77). E01 sits on two
+edges: human-route mass 0.27–0.41 vs 0.35, and drafts grounded 0.56–0.70. E05 passed every final
+run but once fell just short (0.78 vs 0.80). **Cost: $0.026–0.028 per 100 tickets**; all runs ≈ $0.08.
 
 ## What I would improve
 
-**Next:** answer the FAQ part of mixed tickets (FAQ question + bug) and hand off the rest; have a
-Dutch speaker review a reply test set. **Brief change:** "P2: money is involved" also covers plain
-price questions, which the labels call P4; I'd say "money is *disputed*".
+Every miss is a safe-side handoff: 0 unsafe in all runs, but 50% handoffs vs 30% in the labels.
+Next: reply more often without lowering any bar.
+
+1. **Repair the sentence, not the draft.** Jev returns a score, not a reason. Ask one yes/no per
+   draft sentence in the same call, rewrite only the failing one, verify again at 0.80 (E10, E05).
+2. **Steady decisions near a threshold.** Within ±0.05 of a line (E01: 0.27–0.41 vs 0.35), decide
+   again and average (≈ $0.00013 per Jev call); run the interpreter at temperature 0 too.
+3. **Mixed tickets:** a refund that also asks a how-to still goes to a human, but the note can
+   carry a verified draft for the FAQ part.
+4. **A bigger eval:** hand-label the 30 practice tickets (one of 10 examples is 10 points) and have
+   a Dutch speaker check tone and register (je/u).
+
+**Brief change:** "P2: money is involved" also covers price questions the labels call P4 (E07);
+I'd say "money is *disputed*".
