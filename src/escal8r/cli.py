@@ -54,6 +54,11 @@ def _build_parser() -> argparse.ArgumentParser:
         "--dry-run", action="store_true", help="decide and log, but post and save nothing"
     )
     run_cmd.add_argument("--limit", type=int, help="handle at most this many open tickets")
+    run_cmd.add_argument(
+        "--all",
+        action="store_true",
+        help="with --dry-run: also decide already-handled tickets (read-only, never posts)",
+    )
 
     eval_cmd = commands.add_parser("eval", help="score the agent on GET /examples (no posting)")
     eval_cmd.add_argument("--name", default="latest", help="results file name in eval/results/")
@@ -115,6 +120,7 @@ def _cmd_run(
     tracer: Tracer,
     dry_run: bool,
     limit: int | None,
+    include_handled: bool = False,
 ) -> int:
     ticket_log = TicketLog(LOG_DIR, run_id=tracer.run_id)
     with _agent(settings) as (agent, tracker):
@@ -126,6 +132,7 @@ def _cmd_run(
             tracer=tracer,
             dry_run=dry_run,
             limit=limit,
+            include_handled=include_handled,
         )
     print(json.dumps({"counts": summary.counts(), "actions": summary.actions}, indent=2))
     if summary.stopped:
@@ -235,7 +242,12 @@ def main(argv: list[str] | None = None) -> int:
                 print(json.dumps(report, indent=2, ensure_ascii=False))
                 return 0
             if args.command == "run":
-                return _cmd_run(settings, helpdesk, store, tracer, args.dry_run, args.limit)
+                if args.all and not args.dry_run:
+                    print("error: --all is only allowed with --dry-run", file=sys.stderr)
+                    return 2
+                return _cmd_run(
+                    settings, helpdesk, store, tracer, args.dry_run, args.limit, args.all
+                )
             if args.command == "eval":
                 return _cmd_eval(settings, helpdesk, tracer, args.name)
             if args.command == "reset":

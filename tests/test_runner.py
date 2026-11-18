@@ -29,7 +29,9 @@ class FakeHelpdesk:
         self.resets = 0
 
     def iter_tickets(self, status: str = "open") -> Iterator[Ticket]:
-        yield from (t for tid, t in self.tickets.items() if tid not in self.answers)
+        yield from (
+            t for tid, t in self.tickets.items() if status == "all" or tid not in self.answers
+        )
 
     def post_decision(self, ticket_id: str, decision: Decision) -> dict[str, Any]:
         queued = self.failures.get(ticket_id)
@@ -281,3 +283,16 @@ def test_limit_does_not_hide_tickets_from_recovery(store):
     run(desk, store, CountingDecider())  # T003 saved, response lost -> in_progress
     summary = run(desk, store, CountingDecider(), limit=1)
     assert summary.recovered == ["T003"]
+
+
+def test_dry_run_all_decides_handled_tickets_without_posting(store):
+    desk, decide = FakeHelpdesk(["T001", "T002"]), CountingDecider()
+    run(desk, store, decide)  # both handled and done locally
+    summary = run(desk, store, decide, dry_run=True, include_handled=True)
+    assert set(summary.dry_run) == {"T001", "T002"}  # decided fresh, state ignored
+    assert all(len(answers) == 1 for answers in desk.answers.values())  # nothing re-posted
+
+
+def test_include_handled_refuses_a_live_run(store):
+    with pytest.raises(ValueError, match="dry_run"):
+        run(FakeHelpdesk(["T001"]), store, CountingDecider(), include_handled=True)

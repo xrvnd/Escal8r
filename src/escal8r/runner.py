@@ -67,11 +67,28 @@ def run(
     tracer: Tracer = NULL_TRACER,
     dry_run: bool = False,
     limit: int | None = None,
+    include_handled: bool = False,
 ) -> RunSummary:
-    """Handle every open ticket once (or the first `limit`). Dry-run posts and saves nothing."""
+    """Handle every open ticket once (or the first `limit`). Dry-run posts and saves nothing.
+
+    `include_handled` (dry-run only) also decides tickets the helpdesk already marks
+    handled, using read-only GET requests, so a version can be checked on every ticket
+    without resetting the helpdesk.
+    """
+    if include_handled and not dry_run:
+        raise ValueError("include_handled is only allowed with dry_run: it must never post")
     logger: TicketLog | _NullLog = ticket_log or _NullLog()
     if dry_run:
-        return _run(client, store, decide, logger, tracer, dry_run=True, limit=limit)
+        return _run(
+            client,
+            store,
+            decide,
+            logger,
+            tracer,
+            dry_run=True,
+            limit=limit,
+            status="all" if include_handled else "open",
+        )
     with store.exclusive():
         return _run(client, store, decide, logger, tracer, dry_run=False, limit=limit)
 
@@ -85,10 +102,11 @@ def _run(
     *,
     dry_run: bool,
     limit: int | None,
+    status: str = "open",
 ) -> RunSummary:
     summary = RunSummary()
-    with tracer.span("fetch_open") as span:
-        open_tickets = list(client.iter_tickets("open"))
+    with tracer.span("fetch_open", status=status) as span:
+        open_tickets = list(client.iter_tickets(status))
         span.set(open_tickets=len(open_tickets))
     log.info("%d open tickets", len(open_tickets))
 
@@ -125,7 +143,8 @@ def _handle(
     dry_run: bool,
 ) -> str | None:
     """Decide and post one ticket inside its root span. Returns a reason to stop the run."""
-    entry = store.get(ticket.id)
+    # A dry run decides every ticket fresh: local state only guards real posting.
+    entry = None if dry_run else store.get(ticket.id)
     if entry and entry.status == Status.DONE:
         # Open in the helpdesk but done locally: the helpdesk was reset without
         # clearing local state. Never risk a second answer; `escal8r reset` clears both.
