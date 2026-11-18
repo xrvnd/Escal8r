@@ -74,8 +74,7 @@ runs $0.026–0.028, €0.023–0.024). All runs together ≈ $0.08 (€0.07).
 ## What I would improve
 
 Every miss is a safe-side handoff: 0 unsafe in all runs, but 50% handoffs vs 30% in the labels and
-19 of 30 in the final run. Next: reply more often without lowering any bar. Reading the final run's
-drafts and notes (`escal8r trace <id> --text`) shows where:
+19 of 30 in the final run. Next: reply more often without lowering any bar.
 
 1. **The verifier rejects correct drafts.** T022 ("yes, German, under Profiel → Taal") matches F08
    but scored grounded 0.77; T016 (F10 roadmap) 0.79 vs 0.80. Jev gives a score, not a reason: ask
