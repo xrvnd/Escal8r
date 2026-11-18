@@ -10,6 +10,7 @@ Each stage is also a span in the local trail (see tracing.py).
 
 from __future__ import annotations
 
+import re
 from typing import Any, cast
 
 from escal8r.config import LANGUAGE_NAMES, Thresholds
@@ -34,6 +35,16 @@ FALLBACK_PRIORITY: Priority = "P3"
 DEFAULT_LANGUAGE: Language = "nl"  # most Roosterly customers write Dutch
 INJECTION_NOTE = " The ticket contained instructions aimed at an AI; they were ignored."
 INJECTION_THRESHOLD = 0.5
+
+# Reply/forward prefixes (English, Dutch, German) and punctuation carry no request.
+_REPLY_PREFIXES = re.compile(r"\b(re|fw|fwd|aw|wg|antw|doorst)\s*:", re.IGNORECASE)
+
+
+def _is_empty(ticket: Ticket) -> bool:
+    """Nothing to act on: no body, and a subject that is blank or only "Re:"-style prefixes.
+    A subject like "Refund please" with no body is NOT empty: it goes through the pipeline."""
+    subject = _REPLY_PREFIXES.sub("", ticket.subject)
+    return not ticket.body.strip() and not any(char.isalnum() for char in subject)
 
 
 def _fallback_language(interpretation: Interpretation | None) -> Language:
@@ -94,14 +105,14 @@ class Agent:
             stage.set(payment_details_redacted=safe != ticket, plan=safe.customer_plan)
             record_text(stage, "ticket", f"subject: {safe.subject}\nbody: {safe.body}")
 
-        if not safe.body.strip():
+        if _is_empty(safe):
             trace["rule"] = "empty"
             return Decision(
                 action="close",
                 language=DEFAULT_LANGUAGE,
                 category="other",
                 priority="P4",
-                reason="Empty ticket: no message body, so there is nothing to answer.",
+                reason="Empty ticket: no message and no subject, so there is nothing to answer.",
                 confidence=1.0,
             )
 

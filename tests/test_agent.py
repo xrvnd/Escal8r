@@ -130,6 +130,19 @@ def test_empty_ticket_closes_without_model_calls():
     assert deepseek.called == []
 
 
+@pytest.mark.parametrize("subject", ["", "Re:", "RE: Fwd:", "AW: WG:", "Antw: -"])
+def test_content_free_subject_and_empty_body_closes(subject):
+    agent, _, _ = make_agent()
+    assert agent.decide(Ticket(id="T012", subject=subject, body="")).decision.action == "close"
+
+
+def test_subject_with_content_and_empty_body_is_not_closed():
+    agent, deepseek, _ = make_agent(jev={"decision": jev_decision(refund_or_disputed_charge=0.9)})
+    decided = agent.decide(Ticket(id="T099", subject="Refund please", body=""))
+    assert decided.decision.action == "handoff"
+    assert "interpret" in deepseek.called
+
+
 def test_spam_closes():
     agent, _, _ = make_agent(
         jev={
