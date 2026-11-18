@@ -12,6 +12,7 @@ from datetime import UTC, datetime
 from pathlib import Path
 
 from escal8r.agent import Agent
+from escal8r.compare import eval_metrics, format_comparison, run_metrics, ticket_diff
 from escal8r.config import (
     DEEPSEEK_MODEL,
     FAQ_PATH,
@@ -28,7 +29,14 @@ from escal8r.evaluation import evaluate, format_report, save_report
 from escal8r.faq import load_faq
 from escal8r.helpdesk import HelpdeskClient
 from escal8r.jev import Jev
-from escal8r.observability import check_run, format_check, latest_trace, load_trail, render_trail
+from escal8r.observability import (
+    Trail,
+    check_run,
+    format_check,
+    latest_trace,
+    load_trail,
+    render_trail,
+)
 from escal8r.openrouter import CostTracker, OpenRouterClient, StopRun
 from escal8r.runner import reset_all, run
 from escal8r.state import StateError, StateStore
@@ -74,6 +82,12 @@ def _build_parser() -> argparse.ArgumentParser:
         "trace-check", help="observability eval: is every ticket's trail complete?"
     )
     check.add_argument("--run", help="run id (default: the newest trail)")
+
+    compare = commands.add_parser("compare", help="compare two versions from their trails")
+    compare.add_argument("--a", required=True, help="run id of version A (dry or live run)")
+    compare.add_argument("--b", required=True, help="run id of version B")
+    compare.add_argument("--a-eval", nargs="*", default=[], help="eval run ids of version A")
+    compare.add_argument("--b-eval", nargs="*", default=[], help="eval run ids of version B")
 
     reset = commands.add_parser(
         "reset", help="re-open all practice tickets and clear local state (destroys the last run)"
@@ -171,6 +185,36 @@ def _cmd_trace(ticket_id: str, run_id: str | None, show_text: bool) -> int:
     return 0
 
 
+def _cmd_compare(a: str, b: str, a_eval: list[str], b_eval: list[str]) -> int:
+    def trail(run_id: str) -> Trail:
+        path = TRACE_DIR / f"{run_id}.jsonl"
+        if not path.exists():
+            raise FileNotFoundError(f"no trail traces/{run_id}.jsonl")
+        return load_trail(path)
+
+    try:
+        run_a, run_b = run_metrics(trail(a)), run_metrics(trail(b))
+        eval_a = eval_metrics([trail(r) for r in a_eval])
+        eval_b = eval_metrics([trail(r) for r in b_eval])
+        diff = ticket_diff(trail(a), trail(b))
+    except FileNotFoundError as exc:
+        print(f"error: {exc}", file=sys.stderr)
+        return 1
+    print(format_comparison(run_a, run_b, eval_a, eval_b, diff))
+    report = {
+        "a": a,
+        "b": b,
+        "run_a": run_a,
+        "run_b": run_b,
+        "eval_a": eval_a,
+        "eval_b": eval_b,
+        "changed_tickets": diff,
+    }
+    saved = save_report(report, EVAL_DIR, f"compare-{a}-vs-{b}")
+    print(f"\nsaved: {saved.relative_to(PROJECT_ROOT)}")
+    return 0
+
+
 def _cmd_trace_check(run_id: str | None) -> int:
     path = _trace_file(run_id)
     if path is None:
@@ -224,6 +268,8 @@ def main(argv: list[str] | None = None) -> int:
         return _cmd_trace(args.ticket, args.run, args.text)
     if args.command == "trace-check":
         return _cmd_trace_check(args.run)
+    if args.command == "compare":
+        return _cmd_compare(args.a, args.b, args.a_eval, args.b_eval)
 
     tracer = NULL_TRACER
     if args.command == "run":

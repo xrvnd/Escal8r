@@ -323,3 +323,28 @@ def test_span_outside_a_run_records_nothing(tmp_path):
     with tracing.span("helpdesk") as orphan:
         tracing.record_text(orphan, "request", "x")
     assert not list(tmp_path.iterdir())
+
+
+def test_compare_two_runs(traced_run, tmp_path, monkeypatch, capsys):
+    from escal8r import cli
+    from escal8r.compare import run_metrics, ticket_diff
+
+    _, trail, _, path = traced_run
+    metrics = run_metrics(trail)
+    assert (metrics["tickets"], metrics["reply"], metrics["handoff"], metrics["close"]) == (
+        3,
+        1,
+        1,
+        1,
+    )
+    assert metrics["verify_passed"] == 1 and metrics["posts"] == 3
+    assert metrics["helpdesk_retries"] == 1  # the scripted 503 on T003
+    assert metrics["trace_check_score"] == 1.0
+    assert ticket_diff(trail, trail) == []
+
+    monkeypatch.setattr(cli, "TRACE_DIR", path.parent)
+    monkeypatch.setattr(cli, "EVAL_DIR", tmp_path / "results")
+    monkeypatch.setattr(cli, "PROJECT_ROOT", tmp_path)
+    assert cli.main(["compare", "--a", "testrun", "--b", "testrun"]) == 0
+    out = capsys.readouterr().out
+    assert "| handoff_rate |" in out and "Tickets whose decision changed: 0" in out
