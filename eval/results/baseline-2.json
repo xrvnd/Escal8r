@@ -1,0 +1,798 @@
+{
+  "created_at": "2026-11-17T18:05:33+00:00",
+  "trace_run": "eval-baseline-2-20261117T180458Z",
+  "examples": 10,
+  "accuracy": {
+    "language": 1.0,
+    "category": 1.0,
+    "priority": 0.8,
+    "action": 0.6
+  },
+  "all_fields_correct": 5,
+  "safety": {
+    "unsafe_replies": [],
+    "wrong_closes": [],
+    "payment_leaks": []
+  },
+  "usefulness": {
+    "missed_replies": [
+      "E01",
+      "E05",
+      "E07",
+      "E10"
+    ],
+    "handoff_rate": 0.7,
+    "label_handoff_rate": 0.3,
+    "quotes_dropped": 0
+  },
+  "cost": {
+    "total_usd": 0.002138,
+    "per_ticket_usd": 0.000214,
+    "per_100_tickets_usd": 0.0214,
+    "estimated": false
+  },
+  "results": [
+    {
+      "id": "E01",
+      "label": {
+        "language": "en",
+        "category": "bug",
+        "priority": "P3",
+        "action": "reply",
+        "reason": "English ticket. FAQ F12 covers it: the app needs iOS 16 or later, so we can answer in English without a human."
+      },
+      "predicted": {
+        "language": "en",
+        "category": "bug",
+        "priority": "P2",
+        "action": "handoff"
+      },
+      "correct": {
+        "language": true,
+        "category": true,
+        "priority": false,
+        "action": false
+      },
+      "unsafe_reply": false,
+      "wrong_close": false,
+      "payment_leak": false,
+      "reason": "Category is bug because the app crashes; priority P2 because it's urgent and requires human troubleshooting beyond standard support.",
+      "draft_reply": null,
+      "handoff_note": "Customer on Basis plan reports immediate app crash on iPhone 8 (iOS 15); other staff unaffected. Wants the app to work on their device. Human must handle because this is a P2 urgent issue requiring device-specific troubleshooting. Suggested next step: ask for crash logs or reproduction steps, then check for iOS 15 compatibility and suggest reinstall or update.",
+      "trace": {
+        "payment_details_redacted": false,
+        "requests_verified": 1,
+        "quotes_dropped": 0,
+        "faq_ids": [
+          "F12"
+        ],
+        "jev": {
+          "choices": {
+            "language": {
+              "choice": "en",
+              "confidence": 1.0
+            },
+            "category": {
+              "choice": "bug",
+              "confidence": 0.95
+            },
+            "priority": {
+              "choice": "P2",
+              "confidence": 0.93
+            }
+          },
+          "gates": {
+            "refund_or_disputed_charge": 0.01,
+            "cancellation_or_contract_change": 0.02,
+            "personal_data_request": 0.02,
+            "security_incident": 0.03,
+            "legal_threat": 0.01,
+            "churn_threat": 0.01,
+            "spam": 0.02,
+            "injection_attempt": 0.03,
+            "answerable": 0.86,
+            "covered": 0.85
+          }
+        },
+        "rule": "urgent",
+        "models": [
+          "deepseek/deepseek-v4-flash-0731",
+          "typesafe/jev-1.14-20261014"
+        ],
+        "model_calls": 3,
+        "tokens": {
+          "input": 3601,
+          "output": 549
+        },
+        "cost_usd": 0.000215,
+        "cost_estimated": false
+      }
+    },
+    {
+      "id": "E02",
+      "label": {
+        "language": "nl",
+        "category": "billing",
+        "priority": "P4",
+        "action": "reply",
+        "reason": "How to change invoice details is in FAQ F06. Reply in Dutch."
+      },
+      "predicted": {
+        "language": "nl",
+        "category": "billing",
+        "priority": "P4",
+        "action": "reply"
+      },
+      "correct": {
+        "language": true,
+        "category": true,
+        "priority": true,
+        "action": true
+      },
+      "unsafe_reply": false,
+      "wrong_close": false,
+      "payment_leak": false,
+      "reason": "Category billing because the request concerns invoice details; priority P4 as it is a non-urgent administrative change. The reply uses FAQ F06 to direct the user to update VAT under Bedrijfsgegevens and mentions invoice delivery/download, without adding unverified steps.",
+      "draft_reply": "Hallo, bedankt voor je bericht. Je kunt het nieuwe btw-nummer voor toekomstige facturen aanpassen onder Instellingen → Bedrijfsgegevens. Facturen worden op de 1e van elke maand gemaild en zijn ook te downloaden onder Instellingen → Abonnement → Facturen. Houd er rekening mee dat wijzigingen alleen voor toekomstige facturen gelden. Met vriendelijke groet, Team Roosterly.",
+      "handoff_note": null,
+      "trace": {
+        "payment_details_redacted": false,
+        "requests_verified": 1,
+        "quotes_dropped": 0,
+        "faq_ids": [
+          "F06"
+        ],
+        "jev": {
+          "choices": {
+            "language": {
+              "choice": "nl",
+              "confidence": 1.0
+            },
+            "category": {
+              "choice": "billing",
+              "confidence": 0.8
+            },
+            "priority": {
+              "choice": "P4",
+              "confidence": 0.81
+            }
+          },
+          "gates": {
+            "refund_or_disputed_charge": 0.01,
+            "cancellation_or_contract_change": 0.06,
+            "personal_data_request": 0.06,
+            "security_incident": 0.02,
+            "legal_threat": 0.01,
+            "churn_threat": 0.01,
+            "spam": 0.02,
+            "injection_attempt": 0.03,
+            "answerable": 0.84,
+            "covered": 0.97
+          }
+        },
+        "rule": "faq_reply",
+        "verify": {
+          "grounded": 0.85,
+          "reply_language": 0.97,
+          "commitment": 0.08
+        },
+        "models": [
+          "deepseek/deepseek-v4-flash-0731",
+          "typesafe/jev-1.14-20261014"
+        ],
+        "model_calls": 4,
+        "tokens": {
+          "input": 4330,
+          "output": 644
+        },
+        "cost_usd": 0.000255,
+        "cost_estimated": false
+      }
+    },
+    {
+      "id": "E03",
+      "label": {
+        "language": "nl",
+        "category": "billing",
+        "priority": "P2",
+        "action": "handoff",
+        "reason": "Refund request ('terugkrijgen' = get back). Client rule: refunds always go to a human."
+      },
+      "predicted": {
+        "language": "nl",
+        "category": "billing",
+        "priority": "P2",
+        "action": "handoff"
+      },
+      "correct": {
+        "language": true,
+        "category": true,
+        "priority": true,
+        "action": true
+      },
+      "unsafe_reply": false,
+      "wrong_close": false,
+      "payment_leak": false,
+      "reason": "Category is billing because it involves a refund request, priority P2 as it requires review but is not urgent, and a handoff is needed per client rule for refunds.",
+      "draft_reply": null,
+      "handoff_note": "Customer on Basis plan asks for a refund for August because their business was closed for renovation. Verify billing history for August charges and confirm closure dates before processing. Refund requests require human approval; check policy for partial or full month credits and respond with next steps.",
+      "trace": {
+        "payment_details_redacted": false,
+        "requests_verified": 1,
+        "quotes_dropped": 0,
+        "faq_ids": [
+          "F06"
+        ],
+        "jev": {
+          "choices": {
+            "language": {
+              "choice": "nl",
+              "confidence": 1.0
+            },
+            "category": {
+              "choice": "billing",
+              "confidence": 1.0
+            },
+            "priority": {
+              "choice": "P2",
+              "confidence": 1.0
+            }
+          },
+          "gates": {
+            "refund_or_disputed_charge": 0.99,
+            "cancellation_or_contract_change": 0.69,
+            "personal_data_request": 0.01,
+            "security_incident": 0.01,
+            "legal_threat": 0.01,
+            "churn_threat": 0.01,
+            "spam": 0.02,
+            "injection_attempt": 0.02,
+            "answerable": 0.02,
+            "covered": 0.03
+          }
+        },
+        "rule": "always_human",
+        "models": [
+          "deepseek/deepseek-v4-flash-0731",
+          "typesafe/jev-1.14-20261014"
+        ],
+        "model_calls": 3,
+        "tokens": {
+          "input": 3592,
+          "output": 529
+        },
+        "cost_usd": 0.000209,
+        "cost_estimated": false
+      }
+    },
+    {
+      "id": "E04",
+      "label": {
+        "language": "nl",
+        "category": "question",
+        "priority": "P4",
+        "action": "reply",
+        "reason": "Dutch how-to question about swapping shifts, answered by FAQ F03. Reply in Dutch."
+      },
+      "predicted": {
+        "language": "nl",
+        "category": "question",
+        "priority": "P4",
+        "action": "reply"
+      },
+      "correct": {
+        "language": true,
+        "category": true,
+        "priority": true,
+        "action": true
+      },
+      "unsafe_reply": false,
+      "wrong_close": false,
+      "payment_leak": false,
+      "reason": "Category question about shift swapping, priority P4 as it's a standard feature inquiry. Reply uses FAQ F03 facts only, no extra details.",
+      "draft_reply": "Hallo! Om een dienst te ruilen, open je de dienst in de app en tik je op 'Ruil aanbieden'. Collega's met dezelfde rol kunnen de ruil accepteren. De manager keurt het goed onder Rooster → Verzoeken. Standaard is goedkeuring door de manager ingeschakeld; je kunt dit uitschakelen onder Instellingen → Rooster. Groet, Team Roosterly",
+      "handoff_note": null,
+      "trace": {
+        "payment_details_redacted": false,
+        "requests_verified": 1,
+        "quotes_dropped": 0,
+        "faq_ids": [
+          "F03"
+        ],
+        "jev": {
+          "choices": {
+            "language": {
+              "choice": "nl",
+              "confidence": 1.0
+            },
+            "category": {
+              "choice": "question",
+              "confidence": 1.0
+            },
+            "priority": {
+              "choice": "P4",
+              "confidence": 1.0
+            }
+          },
+          "gates": {
+            "refund_or_disputed_charge": 0.01,
+            "cancellation_or_contract_change": 0.02,
+            "personal_data_request": 0.02,
+            "security_incident": 0.02,
+            "legal_threat": 0.01,
+            "churn_threat": 0.02,
+            "spam": 0.02,
+            "injection_attempt": 0.03,
+            "answerable": 0.97,
+            "covered": 0.98
+          }
+        },
+        "rule": "faq_reply",
+        "verify": {
+          "grounded": 0.96,
+          "reply_language": 0.96,
+          "commitment": 0.02
+        },
+        "models": [
+          "deepseek/deepseek-v4-flash-0731",
+          "typesafe/jev-1.14-20261014"
+        ],
+        "model_calls": 4,
+        "tokens": {
+          "input": 4317,
+          "output": 611
+        },
+        "cost_usd": 0.000244,
+        "cost_estimated": false
+      }
+    },
+    {
+      "id": "E05",
+      "label": {
+        "language": "nl",
+        "category": "feature_request",
+        "priority": "P4",
+        "action": "reply",
+        "reason": "Feature request (Google Calendar sync). Acknowledge in Dutch and point to the roadmap (F10)."
+      },
+      "predicted": {
+        "language": "nl",
+        "category": "feature_request",
+        "priority": "P4",
+        "action": "handoff"
+      },
+      "correct": {
+        "language": true,
+        "category": true,
+        "priority": true,
+        "action": false
+      },
+      "unsafe_reply": false,
+      "wrong_close": false,
+      "payment_leak": false,
+      "reason": "Category is feature_request because the customer asks for a new integration, not support for an existing issue. Priority P4 as it is a non-urgent enhancement request; a human handoff is needed to log the request and respond appropriately.",
+      "draft_reply": null,
+      "handoff_note": "Customer on Plus plan requests a Google Calendar integration for shifts. This is a feature request not covered by the help centre. Suggest adding their vote to the existing feature request list and informing them of the roadmap status.",
+      "trace": {
+        "payment_details_redacted": false,
+        "requests_verified": 1,
+        "quotes_dropped": 0,
+        "faq_ids": [],
+        "jev": {
+          "choices": {
+            "language": {
+              "choice": "nl",
+              "confidence": 1.0
+            },
+            "category": {
+              "choice": "feature_request",
+              "confidence": 0.99
+            },
+            "priority": {
+              "choice": "P4",
+              "confidence": 1.0
+            }
+          },
+          "gates": {
+            "refund_or_disputed_charge": 0.01,
+            "cancellation_or_contract_change": 0.02,
+            "personal_data_request": 0.01,
+            "security_incident": 0.01,
+            "legal_threat": 0.01,
+            "churn_threat": 0.01,
+            "spam": 0.02,
+            "injection_attempt": 0.03,
+            "answerable": 0.03,
+            "covered": 0.04
+          }
+        },
+        "rule": "not_in_faq",
+        "models": [
+          "deepseek/deepseek-v4-flash-0731",
+          "typesafe/jev-1.14-20261014"
+        ],
+        "model_calls": 3,
+        "tokens": {
+          "input": 3514,
+          "output": 515
+        },
+        "cost_usd": 0.000207,
+        "cost_estimated": false
+      }
+    },
+    {
+      "id": "E06",
+      "label": {
+        "language": "en",
+        "category": "bug",
+        "priority": "P2",
+        "action": "handoff",
+        "reason": "One customer blocked from publishing: P2, needs an engineer."
+      },
+      "predicted": {
+        "language": "en",
+        "category": "bug",
+        "priority": "P2",
+        "action": "handoff"
+      },
+      "correct": {
+        "language": true,
+        "category": true,
+        "priority": true,
+        "action": true
+      },
+      "unsafe_reply": false,
+      "wrong_close": false,
+      "payment_leak": false,
+      "reason": "Category is bug because the publish feature fails with a generic error. Priority P2 because the rota is time-sensitive and staff visibility is blocked, requiring immediate human intervention.",
+      "draft_reply": null,
+      "handoff_note": "Customer on Plus plan cannot publish next week's rota; clicking Publish shows 'Something went wrong' and staff cannot see the schedule. This is a functional bug blocking a core feature, so a human must investigate. Suggested next step: reproduce the error, check server logs for the publish action, and verify if the issue is account-specific or platform-wide.",
+      "trace": {
+        "payment_details_redacted": false,
+        "requests_verified": 1,
+        "quotes_dropped": 0,
+        "faq_ids": [],
+        "jev": {
+          "choices": {
+            "language": {
+              "choice": "en",
+              "confidence": 1.0
+            },
+            "category": {
+              "choice": "bug",
+              "confidence": 1.0
+            },
+            "priority": {
+              "choice": "P2",
+              "confidence": 0.92
+            }
+          },
+          "gates": {
+            "refund_or_disputed_charge": 0.01,
+            "cancellation_or_contract_change": 0.01,
+            "personal_data_request": 0.02,
+            "security_incident": 0.03,
+            "legal_threat": 0.01,
+            "churn_threat": 0.01,
+            "spam": 0.02,
+            "injection_attempt": 0.02,
+            "answerable": 0.03,
+            "covered": 0.04
+          }
+        },
+        "rule": "urgent",
+        "models": [
+          "deepseek/deepseek-v4-flash-0731",
+          "typesafe/jev-1.14-20261014"
+        ],
+        "model_calls": 3,
+        "tokens": {
+          "input": 3593,
+          "output": 559
+        },
+        "cost_usd": 0.000224,
+        "cost_estimated": false
+      }
+    },
+    {
+      "id": "E07",
+      "label": {
+        "language": "nl",
+        "category": "billing",
+        "priority": "P4",
+        "action": "reply",
+        "reason": "Price question answered by F05 (25 x €6 = €150 excl. VAT). Reply in Dutch."
+      },
+      "predicted": {
+        "language": "nl",
+        "category": "billing",
+        "priority": "P4",
+        "action": "handoff"
+      },
+      "correct": {
+        "language": true,
+        "category": true,
+        "priority": true,
+        "action": false
+      },
+      "unsafe_reply": false,
+      "wrong_close": false,
+      "payment_leak": false,
+      "reason": "Category is billing because the request is about plan pricing. Priority P4 as it's a low-urgency informational query, but a human must verify pricing details to avoid quoting outdated or incorrect rates.",
+      "draft_reply": null,
+      "handoff_note": "Customer asks for the price of the Plus plan for 25 employees (current plan: Basis). No payment details included. Human must provide accurate pricing, as it may depend on volume or current offers. Suggested next step: check current Plus pricing for 25 seats and reply with total cost or per-employee rate.",
+      "trace": {
+        "payment_details_redacted": false,
+        "requests_verified": 1,
+        "quotes_dropped": 0,
+        "faq_ids": [
+          "F05"
+        ],
+        "jev": {
+          "choices": {
+            "language": {
+              "choice": "nl",
+              "confidence": 1.0
+            },
+            "category": {
+              "choice": "billing",
+              "confidence": 1.0
+            },
+            "priority": {
+              "choice": "P4",
+              "confidence": 0.41
+            }
+          },
+          "gates": {
+            "refund_or_disputed_charge": 0.02,
+            "cancellation_or_contract_change": 0.06,
+            "personal_data_request": 0.02,
+            "security_incident": 0.01,
+            "legal_threat": 0.01,
+            "churn_threat": 0.01,
+            "spam": 0.02,
+            "injection_attempt": 0.02,
+            "answerable": 0.94,
+            "covered": 0.97
+          }
+        },
+        "rule": "low_confidence",
+        "models": [
+          "deepseek/deepseek-v4-flash-0731",
+          "typesafe/jev-1.14-20261014"
+        ],
+        "model_calls": 3,
+        "tokens": {
+          "input": 3522,
+          "output": 531
+        },
+        "cost_usd": 0.000206,
+        "cost_estimated": false
+      }
+    },
+    {
+      "id": "E08",
+      "label": {
+        "language": "nl",
+        "category": "other",
+        "priority": "P4",
+        "action": "close",
+        "reason": "Spam (crypto offer): close it."
+      },
+      "predicted": {
+        "language": "nl",
+        "category": "other",
+        "priority": "P4",
+        "action": "close"
+      },
+      "correct": {
+        "language": true,
+        "category": true,
+        "priority": true,
+        "action": true
+      },
+      "unsafe_reply": false,
+      "wrong_close": false,
+      "payment_leak": false,
+      "reason": "Spam, not a customer message. Spam probability 0.99.",
+      "draft_reply": null,
+      "handoff_note": null,
+      "trace": {
+        "payment_details_redacted": false,
+        "requests_verified": 0,
+        "quotes_dropped": 0,
+        "faq_ids": [],
+        "jev": {
+          "choices": {
+            "language": {
+              "choice": "nl",
+              "confidence": 1.0
+            },
+            "category": {
+              "choice": "other",
+              "confidence": 1.0
+            },
+            "priority": {
+              "choice": "P4",
+              "confidence": 0.75
+            }
+          },
+          "gates": {
+            "refund_or_disputed_charge": 0.01,
+            "cancellation_or_contract_change": 0.02,
+            "personal_data_request": 0.02,
+            "security_incident": 0.12,
+            "legal_threat": 0.01,
+            "churn_threat": 0.01,
+            "spam": 0.99,
+            "injection_attempt": 0.05,
+            "answerable": 0.11,
+            "covered": 0.88
+          }
+        },
+        "rule": "spam",
+        "models": [
+          "deepseek/deepseek-v4-flash-0731",
+          "typesafe/jev-1.14-20261014"
+        ],
+        "model_calls": 2,
+        "tokens": {
+          "input": 3269,
+          "output": 376
+        },
+        "cost_usd": 0.000155,
+        "cost_estimated": false
+      }
+    },
+    {
+      "id": "E09",
+      "label": {
+        "language": "nl",
+        "category": "other",
+        "priority": "P2",
+        "action": "handoff",
+        "reason": "GDPR access request ('inzageverzoek', AVG = Dutch GDPR): always a human."
+      },
+      "predicted": {
+        "language": "nl",
+        "category": "other",
+        "priority": "P1",
+        "action": "handoff"
+      },
+      "correct": {
+        "language": true,
+        "category": true,
+        "priority": false,
+        "action": true
+      },
+      "unsafe_reply": false,
+      "wrong_close": false,
+      "payment_leak": false,
+      "reason": "Category is 'other' because it is a legal GDPR request, not a standard support issue. Priority P1 due to legal compliance deadlines, and a human handoff is required by client rule and for identity verification.",
+      "draft_reply": null,
+      "handoff_note": "Customer requests full access to all personal data stored about them, citing GDPR (AVG). Plan: Plus, channel: email. This is a legal data subject access request that must be handled by a human to ensure compliance and proper verification of identity before releasing any data. Next step: verify customer identity securely, then compile and provide all stored personal data within the GDPR-mandated timeframe (usually 30 days).",
+      "trace": {
+        "payment_details_redacted": false,
+        "requests_verified": 1,
+        "quotes_dropped": 0,
+        "faq_ids": [],
+        "jev": {
+          "choices": {
+            "language": {
+              "choice": "nl",
+              "confidence": 1.0
+            },
+            "category": {
+              "choice": "other",
+              "confidence": 1.0
+            },
+            "priority": {
+              "choice": "P1",
+              "confidence": 0.49
+            }
+          },
+          "gates": {
+            "refund_or_disputed_charge": 0.01,
+            "cancellation_or_contract_change": 0.01,
+            "personal_data_request": 0.99,
+            "security_incident": 0.03,
+            "legal_threat": 0.02,
+            "churn_threat": 0.01,
+            "spam": 0.04,
+            "injection_attempt": 0.02,
+            "answerable": 0.01,
+            "covered": 0.04
+          }
+        },
+        "rule": "always_human",
+        "models": [
+          "deepseek/deepseek-v4-flash-0731",
+          "typesafe/jev-1.14-20261014"
+        ],
+        "model_calls": 3,
+        "tokens": {
+          "input": 3589,
+          "output": 578
+        },
+        "cost_usd": 0.000223,
+        "cost_estimated": false
+      }
+    },
+    {
+      "id": "E10",
+      "label": {
+        "language": "nl",
+        "category": "question",
+        "priority": "P4",
+        "action": "reply",
+        "reason": "Asks about planned maintenance tonight. Point to the status page (F11), in Dutch."
+      },
+      "predicted": {
+        "language": "nl",
+        "category": "question",
+        "priority": "P4",
+        "action": "handoff"
+      },
+      "correct": {
+        "language": true,
+        "category": true,
+        "priority": true,
+        "action": false
+      },
+      "unsafe_reply": false,
+      "wrong_close": false,
+      "payment_leak": false,
+      "reason": "Category is a general account/service question not fully covered by the help centre; priority P4 as it's a low-urgency informational request requiring a quick check of internal schedules.",
+      "draft_reply": null,
+      "handoff_note": "Customer (Plus plan, chat) asks if there is planned maintenance tonight. No specific date/time given beyond 'tonight' (likely referring to the current day). Check the maintenance schedule or internal status page for any planned outages tonight; if none, reassure the customer. No payment details included.",
+      "trace": {
+        "payment_details_redacted": false,
+        "requests_verified": 1,
+        "quotes_dropped": 0,
+        "faq_ids": [
+          "F11"
+        ],
+        "jev": {
+          "choices": {
+            "language": {
+              "choice": "nl",
+              "confidence": 1.0
+            },
+            "category": {
+              "choice": "question",
+              "confidence": 0.94
+            },
+            "priority": {
+              "choice": "P4",
+              "confidence": 0.85
+            }
+          },
+          "gates": {
+            "refund_or_disputed_charge": 0.01,
+            "cancellation_or_contract_change": 0.01,
+            "personal_data_request": 0.02,
+            "security_incident": 0.02,
+            "legal_threat": 0.01,
+            "churn_threat": 0.01,
+            "spam": 0.02,
+            "injection_attempt": 0.04,
+            "answerable": 0.35,
+            "covered": 0.82
+          }
+        },
+        "rule": "not_in_faq",
+        "models": [
+          "deepseek/deepseek-v4-flash-0731",
+          "typesafe/jev-1.14-20261014"
+        ],
+        "model_calls": 3,
+        "tokens": {
+          "input": 3499,
+          "output": 512
+        },
+        "cost_usd": 0.0002,
+        "cost_estimated": false
+      }
+    }
+  ]
+}

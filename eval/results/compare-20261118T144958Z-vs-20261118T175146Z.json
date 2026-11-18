@@ -1,0 +1,244 @@
+{
+  "a": "20261118T144958Z",
+  "b": "20261118T175146Z",
+  "run_a": {
+    "tickets": 30,
+    "reply": 9,
+    "handoff": 19,
+    "close": 2,
+    "handoff_rate": 0.6333333333333333,
+    "priority": {
+      "P1": 3,
+      "P2": 7,
+      "P3": 4,
+      "P4": 16
+    },
+    "category": {
+      "billing": 7,
+      "bug": 7,
+      "feature_request": 4,
+      "other": 5,
+      "question": 7
+    },
+    "rules": {
+      "always_human": 9,
+      "faq_reply": 9,
+      "not_in_faq": 4,
+      "low_confidence": 3,
+      "reply_rejected": 2,
+      "urgent": 1,
+      "spam": 1,
+      "empty": 1
+    },
+    "routes": {},
+    "replies_drafted": 11,
+    "verify_passed": 9,
+    "verify_rejected": 2,
+    "quotes_dropped": 0,
+    "mean_confidence": 0.865,
+    "cost_usd": 0.00701,
+    "cost_per_100_usd": 0.0234,
+    "model_calls_per_ticket": 3.3,
+    "tokens_in_per_ticket": 3932,
+    "tokens_out_per_ticket": 573,
+    "mean_ticket_seconds": 4.61,
+    "mean_stage_ms": {
+      "interpret": 1676,
+      "jev_decide": 577,
+      "write_reply": 2462,
+      "jev_verify": 557,
+      "write_handoff": 2081
+    },
+    "model_retries": 0,
+    "helpdesk_retries": 0,
+    "posts": 0,
+    "error_spans": 0,
+    "trace_check_score": 1.0
+  },
+  "run_b": {
+    "tickets": 30,
+    "reply": 12,
+    "handoff": 16,
+    "close": 2,
+    "handoff_rate": 0.5333333333333333,
+    "priority": {
+      "P1": 2,
+      "P2": 10,
+      "P3": 2,
+      "P4": 16
+    },
+    "category": {
+      "billing": 7,
+      "bug": 7,
+      "feature_request": 4,
+      "other": 5,
+      "question": 7
+    },
+    "rules": {
+      "faq_reply": 12,
+      "always_human": 9,
+      "urgent": 3,
+      "human_route": 3,
+      "spam": 1,
+      "empty": 1,
+      "not_in_faq": 1
+    },
+    "routes": {
+      "human_engineering": 6,
+      "human_billing_dispute": 4,
+      "faq_redirect": 3,
+      "faq_team_and_rota": 3,
+      "human_privacy_legal": 2,
+      "human_other": 2,
+      "faq_plans_invoices": 2,
+      "faq_account_access": 1,
+      "spam": 1,
+      "faq_payroll_export": 1,
+      "human_security": 1,
+      "faq_app_and_languages": 1,
+      "human_contract_change": 1,
+      "faq_data_location": 1
+    },
+    "replies_drafted": 12,
+    "verify_passed": 12,
+    "verify_rejected": 0,
+    "quotes_dropped": 0,
+    "mean_confidence": 0.886,
+    "cost_usd": 0.007729,
+    "cost_per_100_usd": 0.0258,
+    "model_calls_per_ticket": 3.27,
+    "tokens_in_per_ticket": 4557,
+    "tokens_out_per_ticket": 753,
+    "mean_ticket_seconds": 3.61,
+    "mean_stage_ms": {
+      "interpret": 1358,
+      "jev_decide": 545,
+      "write_reply": 1664,
+      "jev_verify": 517,
+      "write_handoff": 1682
+    },
+    "model_retries": 0,
+    "helpdesk_retries": 0,
+    "posts": 0,
+    "error_spans": 0,
+    "trace_check_score": 1.0
+  },
+  "eval_a": {
+    "language_accuracy": 1.0,
+    "category_accuracy": 1.0,
+    "priority_accuracy": 1.0,
+    "action_accuracy": 0.8,
+    "all_fields_correct": 8,
+    "unsafe_replies": 0,
+    "wrong_closes": 0,
+    "missed_replies": 2,
+    "payment_leaks": 0,
+    "handoff_rate": 0.5,
+    "runs": 2
+  },
+  "eval_b": {
+    "language_accuracy": 1.0,
+    "category_accuracy": 1.0,
+    "priority_accuracy": 1.0,
+    "action_accuracy": 0.8,
+    "all_fields_correct": 8,
+    "unsafe_replies": 0,
+    "wrong_closes": 0,
+    "missed_replies": 2,
+    "payment_leaks": 0,
+    "handoff_rate": 0.5,
+    "runs": 2
+  },
+  "changed_tickets": [
+    {
+      "ticket": "T001",
+      "action": [
+        "handoff",
+        "reply"
+      ],
+      "rule": [
+        "low_confidence",
+        "faq_reply"
+      ]
+    },
+    {
+      "ticket": "T002",
+      "priority": [
+        "P3",
+        "P2"
+      ],
+      "rule": [
+        "low_confidence",
+        "urgent"
+      ]
+    },
+    {
+      "ticket": "T006",
+      "priority": [
+        "P1",
+        "P2"
+      ]
+    },
+    {
+      "ticket": "T010",
+      "rule": [
+        "not_in_faq",
+        "human_route"
+      ]
+    },
+    {
+      "ticket": "T013",
+      "priority": [
+        "P3",
+        "P2"
+      ],
+      "rule": [
+        "not_in_faq",
+        "urgent"
+      ]
+    },
+    {
+      "ticket": "T015",
+      "action": [
+        "handoff",
+        "reply"
+      ],
+      "rule": [
+        "reply_rejected",
+        "faq_reply"
+      ]
+    },
+    {
+      "ticket": "T016",
+      "action": [
+        "handoff",
+        "reply"
+      ],
+      "rule": [
+        "reply_rejected",
+        "faq_reply"
+      ]
+    },
+    {
+      "ticket": "T020",
+      "rule": [
+        "low_confidence",
+        "not_in_faq"
+      ]
+    },
+    {
+      "ticket": "T021",
+      "rule": [
+        "not_in_faq",
+        "human_route"
+      ]
+    },
+    {
+      "ticket": "T027",
+      "rule": [
+        "not_in_faq",
+        "human_route"
+      ]
+    }
+  ]
+}
