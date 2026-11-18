@@ -18,11 +18,11 @@ from __future__ import annotations
 import json
 import time
 import uuid
-from collections.abc import Iterator
+from collections.abc import Callable, Iterator
 from contextlib import contextmanager
 from contextvars import ContextVar
 from dataclasses import dataclass, field
-from datetime import UTC, datetime
+from datetime import UTC, datetime, timedelta
 from pathlib import Path
 from typing import Any
 
@@ -57,9 +57,22 @@ def current_span() -> Span | None:
 
 
 class Tracer:
-    def __init__(self, directory: Path | None, run_id: str, *, capture_text: bool = True):
+    def __init__(
+        self,
+        directory: Path | None,
+        run_id: str,
+        *,
+        capture_text: bool = True,
+        clock: Callable[[], float] = time.perf_counter,
+    ):
         self.run_id = run_id
         self.capture_text = capture_text
+        # One wall-clock reading per run; every start time is anchor + monotonic elapsed.
+        # Mixing wall-clock starts with monotonic durations bent trails when the system
+        # clock was adjusted mid-run (an NTP step made children end after their parent).
+        self._clock = clock
+        self._anchor_wall = datetime.now(UTC)
+        self._anchor_mono = clock()
         self.path = directory / f"{run_id}.jsonl" if directory else None
         if directory:
             directory.mkdir(parents=True, exist_ok=True)
@@ -77,8 +90,8 @@ class Tracer:
             tracer=self,
         )
         token = _current.set(span)
-        started = datetime.now(UTC)
-        clock = time.perf_counter()
+        began = self._clock()
+        started = self._anchor_wall + timedelta(seconds=began - self._anchor_mono)
         try:
             yield span
         except BaseException as exc:
@@ -86,7 +99,7 @@ class Tracer:
             raise
         finally:
             _current.reset(token)
-            self._write(span, started, time.perf_counter() - clock)
+            self._write(span, started, self._clock() - began)
 
     def text(self, span: Span, name: str, value: str | None) -> None:
         """Attach redacted text to a span (only when text capture is on)."""

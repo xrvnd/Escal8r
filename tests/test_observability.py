@@ -345,3 +345,27 @@ def test_compare_two_runs(traced_run, tmp_path, monkeypatch, capsys):
     assert cli.main(["compare", "--a", "testrun", "--b", "testrun"]) == 0
     out = capsys.readouterr().out
     assert "| handoff_rate |" in out and "Tickets whose decision changed: 0" in out
+
+
+def test_trail_times_survive_a_wall_clock_jump(tmp_path, monkeypatch):
+    """Regression: start times come from one anchor + a monotonic clock, so an NTP step
+    mid-run cannot make a child end after its parent."""
+    import datetime as real_datetime
+
+    from escal8r import tracing
+
+    ticks = iter([0.0, 0.0, 0.0, 1.0, 1.0, 2.0, 2.0, 3.0])
+    tracer = Tracer(tmp_path, "r", clock=lambda: next(ticks))
+
+    class JumpingDatetime(real_datetime.datetime):
+        @classmethod
+        def now(cls, tz=None):  # the wall clock leaps 10 minutes after the anchor
+            return real_datetime.datetime(2026, 1, 1, 0, 10, tzinfo=tz)
+
+    monkeypatch.setattr(tracing, "datetime", JumpingDatetime)
+    with tracer.span("ticket", ticket_id="T1"):
+        with tracing.span("stage"):
+            pass
+        with tracing.span("stage"):
+            pass
+    assert check_run(load_trail(tracer.path), None)["checks"]["tree_intact"]["failed"] == 0

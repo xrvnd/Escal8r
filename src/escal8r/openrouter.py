@@ -334,6 +334,8 @@ def _compact_answers(answers: dict[str, Any]) -> dict[str, Any]:
             compact[name] = [answer.get("choice"), answer.get("confidence")]
         elif kind == "noul":
             compact[name] = answer.get("noul")
+        elif kind == "score":
+            compact[name] = [answer.get("score"), answer.get("confidence")]
         else:
             compact[name] = kind
     return compact
