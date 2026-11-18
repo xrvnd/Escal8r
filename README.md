@@ -85,14 +85,13 @@ drafts and notes (`escal8r trace <id> --text`) shows where:
    human to check German exists (F08), T016's suggests a delivery "timeline" that F10 rules out.
    Give the note writer the verified FAQ facts, and check notes the way replies are checked.
 3. **Category doubt blocks a reply.** T020 (Shopify POS; route F10 at 0.96) went to a human only
-   on category confidence 0.66 < 0.70. When every likely category gives the same action, skip it.
+   on category confidence 0.66 < 0.70. When every likely category gives the same action, skip the
+   category gate.
 4. **German customers get Dutch menus.** T029 says tap "Ruil aanbieden" with no gloss (T022 had
    one). Always keep the FAQ's English gloss until the client gives German menu names.
-5. **Readable, measured replies.** Log an English back-translation of every reply, and score the
-   cited FAQ id in the eval, not only the four labels.
-6. **Steadier runs.** OpenRouter picks the cheapest provider per call: pin one, and re-decide within
-   ±0.05 of a line (E01: 0.27–0.41 vs 0.35). Then hand-label the 30 practice tickets and have a
-   Dutch speaker check register (je/u).
+5. **Then:** pin one OpenRouter provider, re-decide within ±0.05 of a line (E01: 0.27–0.41 vs 0.35;
+   $0.00013 (€0.00011) per Jev call), log an English back-translation of each reply, and score the
+   cited FAQ id on 30 hand-labelled practice tickets.
 
 **Brief change:** "P2: money is involved" also covers price questions the labels call P4 (E07);
 I'd say "money is *disputed*".
