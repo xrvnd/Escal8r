@@ -273,6 +273,8 @@ class Agent:
                     {
                         "expected_language": LANGUAGE_NAMES[language],
                         "faq_sections": self._faq.render(sections),
+                        # The writer saw the plan, so plan claims must be checkable too.
+                        "customer_plan": ticket.customer_plan,
                         "customer_requests": [r.text_en for r in interpretation.requests],
                         "draft_reply": draft,
                     }

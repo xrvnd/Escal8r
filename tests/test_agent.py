@@ -106,6 +106,14 @@ def test_faq_question_gets_a_verified_reply():
     assert "help_centre_faq" in jev.states[0]
 
 
+def test_verifier_sees_the_customer_plan_the_writer_saw():
+    # T015: the writer correctly said "not on your Basis plan"; without the plan the
+    # verifier could not support that claim and rejected a correct draft.
+    agent, _, jev = make_agent()
+    agent.decide(HOW_TO)
+    assert jev.states[-1]["customer_plan"] == "Basis"
+
+
 def test_trace_contains_no_ticket_or_reply_text():
     agent, _, _ = make_agent()
     trace_text = json.dumps(agent.decide(HOW_TO).trace)

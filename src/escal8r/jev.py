@@ -238,7 +238,8 @@ VERIFY_QUESTIONS: dict[str, dict[str, Any]] = {
     "grounded": _noul(
         "Is every factual claim in draft_reply (steps, menu names, prices, plans, limits, links, "
         "times) supported by faq_sections? Simple arithmetic on FAQ prices counts as supported. "
-        "Greetings and polite phrases are not claims.",
+        "customer_plan is a known fact: stating the customer's plan, or what the FAQ says that "
+        "plan includes or lacks, counts as supported. Greetings and polite phrases are not claims.",
         "Every claim is supported by faq_sections.",
         "At least one claim is missing from, or contradicts, faq_sections.",
     ),
